@@ -118,7 +118,7 @@ def export_to_pdf(conn: sqlite3.Connection, article_ids: Optional[List[int]] = N
                 pdf.multi_cell(0, 6, para)
                 pdf.ln(2)
 
-    return pdf.output()
+    return bytes(pdf.output())
 
 
 def export_to_txt(conn: sqlite3.Connection, article_ids: Optional[List[int]] = None) -> str:
