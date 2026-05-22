@@ -39,25 +39,48 @@ from fastapi.responses import (
 from pydantic import BaseModel
 import httpx
 
-# 导入功能模块
-from backend.exporters import export_to_pdf, export_to_txt, export_to_xml, export_to_mobi
-from backend.importers import (
-    import_from_pocket_csv, import_from_wallabag_json,
-    import_from_bookmarks_html, import_from_instapaper_csv
-)
-from backend.rss_output import generate_rss_feed
-from backend.sharing import (
-    init_share_table, create_share, get_shared_article,
-    revoke_share, get_share_info
-)
-from backend.rules import (
-    init_rules_table, apply_rules_to_article, create_rule,
-    get_all_rules, update_rule, delete_rule, apply_rules_to_all
-)
-from backend.sync import (
-    init_users_table, create_user, authenticate_user,
-    verify_token, record_sync_action, get_sync_changes, get_default_user
-)
+# 导入功能模块（支持从项目根目录或 backend 目录运行）
+try:
+    from backend.exporters import export_to_pdf, export_to_txt, export_to_xml, export_to_mobi
+    from backend.importers import (
+        import_from_pocket_csv, import_from_wallabag_json,
+        import_from_bookmarks_html, import_from_instapaper_csv
+    )
+    from backend.rss_output import generate_rss_feed
+    from backend.sharing import (
+        init_share_table, create_share, get_shared_article,
+        revoke_share, get_share_info
+    )
+    from backend.rules import (
+        init_rules_table, apply_rules_to_article, create_rule,
+        get_all_rules, update_rule, delete_rule, apply_rules_to_all
+    )
+    from backend.sync import (
+        init_users_table, create_user, authenticate_user,
+        verify_token, record_sync_action, get_sync_changes, get_default_user
+    )
+except ImportError:
+    # 从 backend 目录运行时使用相对导入
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+    from backend.exporters import export_to_pdf, export_to_txt, export_to_xml, export_to_mobi
+    from backend.importers import (
+        import_from_pocket_csv, import_from_wallabag_json,
+        import_from_bookmarks_html, import_from_instapaper_csv
+    )
+    from backend.rss_output import generate_rss_feed
+    from backend.sharing import (
+        init_share_table, create_share, get_shared_article,
+        revoke_share, get_share_info
+    )
+    from backend.rules import (
+        init_rules_table, apply_rules_to_article, create_rule,
+        get_all_rules, update_rule, delete_rule, apply_rules_to_all
+    )
+    from backend.sync import (
+        init_users_table, create_user, authenticate_user,
+        verify_token, record_sync_action, get_sync_changes, get_default_user
+    )
 
 # 配置
 BASE_DIR = os.path.dirname(__file__)
