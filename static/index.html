@@ -651,12 +651,21 @@
         <div class="navbar-actions">
             <button class="theme-toggle" onclick="toggleTheme()" title="切换主题">🌙</button>
             <button class="btn btn-ghost" onclick="toggleSidebar()">🏷️ 标签</button>
+            <button class="btn btn-ghost" onclick="showRulesModal()">⚙️ 规则</button>
+            <button class="btn btn-ghost" onclick="showImportModal()">📥 导入</button>
+            <a class="btn btn-ghost" href="/api/rss" target="_blank" title="RSS 订阅地址">📡 RSS</a>
             <div class="dropdown">
                 <button class="btn btn-ghost">📤 导出</button>
                 <div class="dropdown-content">
-                    <a class="dropdown-item" href="/api/export/json" target="_blank">JSON 格式</a>
-                    <a class="dropdown-item" href="/api/export/csv" target="_blank">CSV 格式</a>
-                    <a class="dropdown-item" href="/api/export/html" target="_blank">HTML 格式</a>
+                    <a class="dropdown-item" href="/api/export/json" target="_blank">📄 JSON 格式</a>
+                    <a class="dropdown-item" href="/api/export/csv" target="_blank">📊 CSV 格式</a>
+                    <a class="dropdown-item" href="/api/export/html" target="_blank">🌐 HTML 格式</a>
+                    <a class="dropdown-item" href="/api/export/pdf" target="_blank">📕 PDF 格式</a>
+                    <a class="dropdown-item" href="/api/export/txt" target="_blank">📝 纯文本</a>
+                    <a class="dropdown-item" href="/api/export/xml" target="_blank">📋 XML 格式</a>
+                    <a class="dropdown-item" href="/api/export/mobi" target="_blank">📚 EPUB 电子书</a>
+                    <hr style="margin:4px 0;border:none;border-top:1px solid var(--border);">
+                    <a class="dropdown-item" href="/api/backup" target="_blank">💾 数据库备份</a>
                 </div>
             </div>
             <button class="btn btn-primary" onclick="showAddModal()">➕ 添加文章</button>
@@ -718,7 +727,20 @@
             </div>
         </div>
         
-        <!-- 筛选 -->
+        <!-- 智能筛选 -->
+        <div class="filters" id="smartFilters">
+            <button class="filter-btn active" onclick="setTimeFilter(null, this)">全部时间</button>
+            <button class="filter-btn" onclick="setTimeFilter('today', this)">📅 今天</button>
+            <button class="filter-btn" onclick="setTimeFilter('this_week', this)">📆 本周</button>
+            <button class="filter-btn" onclick="setTimeFilter('this_month', this)">🗓️ 本月</button>
+            <button class="filter-btn" onclick="setTimeFilter('this_year', this)">📋 今年</button>
+            <span style="color:var(--text-light);padding:0.4rem;">|</span>
+            <button class="filter-btn" onclick="setReadingTimeFilter(0, 5, this)">⚡ 短文(&lt;5分钟)</button>
+            <button class="filter-btn" onclick="setReadingTimeFilter(5, 15, this)">📖 中等(5-15分钟)</button>
+            <button class="filter-btn" onclick="setReadingTimeFilter(15, 999, this)">📚 长文(&gt;15分钟)</button>
+        </div>
+        
+        <!-- 标签筛选 -->
         <div class="filters" id="tagFilters">
             <!-- 动态生成标签筛选 -->
         </div>
@@ -765,6 +787,10 @@
                 <button class="action-btn" id="readingFavoriteBtn" onclick="toggleReadingFavorite()">☆</button>
                 <button class="action-btn" id="readingReadBtn" onclick="toggleReadingRead()">○</button>
                 <button class="action-btn" id="readingArchiveBtn" onclick="toggleReadingArchive()">📦</button>
+                <button class="action-btn" onclick="shareCurrentArticle()" title="分享">🔗</button>
+                <button class="action-btn" onclick="readArticleAloud()" title="语音朗读">🔊</button>
+                <button class="action-btn" onclick="decreaseFontSize()" title="缩小字体">A-</button>
+                <button class="action-btn" onclick="increaseFontSize()" title="放大字体">A+</button>
                 <a id="readingSourceLink" href="#" target="_blank" class="btn btn-ghost btn-sm">🔗 原文</a>
             </div>
         </div>
@@ -781,6 +807,10 @@
         let selectedArticles = new Set();
         let currentReadingArticle = null;
         let searchTimeout = null;
+        let currentTimeFilter = null;
+        let currentReadingTimeMin = null;
+        let currentReadingTimeMax = null;
+        let currentFontSize = 1.05; // 阅读视图字体大小（rem）
 
         // 初始化
         document.addEventListener('DOMContentLoaded', () => {
@@ -867,6 +897,11 @@
             
             if (search) url += `&search=${encodeURIComponent(search)}`;
             if (currentTag) url += `&tag=${encodeURIComponent(currentTag)}`;
+            
+            // 智能时间筛选
+            if (currentTimeFilter) url += `&time_filter=${currentTimeFilter}`;
+            if (currentReadingTimeMin !== null) url += `&reading_time_min=${currentReadingTimeMin}`;
+            if (currentReadingTimeMax !== null) url += `&reading_time_max=${currentReadingTimeMax}`;
             
             switch (currentFilter) {
                 case 'unread':
@@ -1188,14 +1223,343 @@
             }
         }
 
-        // ESC 键关闭模态框
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                hideAddModal();
-                closeReadingView();
-                document.getElementById('tagSidebar').classList.remove('active');
+        // ==================== 智能筛选 ====================
+        
+        function setTimeFilter(filter, element) {
+            currentTimeFilter = filter;
+            currentReadingTimeMin = null;
+            currentReadingTimeMax = null;
+            
+            document.querySelectorAll('#smartFilters .filter-btn').forEach(btn => btn.classList.remove('active'));
+            element.classList.add('active');
+            
+            loadArticles();
+        }
+        
+        function setReadingTimeFilter(min, max, element) {
+            currentTimeFilter = null;
+            currentReadingTimeMin = min;
+            currentReadingTimeMax = max >= 999 ? null : max;
+            
+            document.querySelectorAll('#smartFilters .filter-btn').forEach(btn => btn.classList.remove('active'));
+            element.classList.add('active');
+            
+            loadArticles();
+        }
+        
+        // ==================== 导入功能 ====================
+        
+        function showImportModal() {
+            document.getElementById('importModal').classList.add('active');
+            document.getElementById('importStatus').textContent = '';
+        }
+        
+        function hideImportModal() {
+            document.getElementById('importModal').classList.remove('active');
+            document.getElementById('importFile').value = '';
+            document.getElementById('importStatus').textContent = '';
+        }
+        
+        async function doImport() {
+            const source = document.getElementById('importSource').value;
+            const fileInput = document.getElementById('importFile');
+            const statusEl = document.getElementById('importStatus');
+            
+            if (!fileInput.files.length) {
+                statusEl.textContent = '❌ 请选择文件';
+                return;
             }
-        });
+            
+            const file = fileInput.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            statusEl.textContent = '⏳ 正在导入，请稍候...';
+            
+            try {
+                const response = await fetch(`/api/import/${source}`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    statusEl.textContent = `✅ 导入完成！成功 ${data.imported} 篇，跳过 ${data.skipped} 篇（已存在）`;
+                    if (data.errors && data.errors.length > 0) {
+                        statusEl.textContent += `\n⚠️ ${data.errors.length} 个错误`;
+                    }
+                    loadStats();
+                    loadArticles();
+                    loadTags();
+                } else {
+                    statusEl.textContent = '❌ 导入失败：' + (data.detail || '未知错误');
+                }
+            } catch (error) {
+                statusEl.textContent = '❌ 导入失败：' + error.message;
+            }
+        }
+        
+        // ==================== 自动标签规则 ====================
+        
+        function showRulesModal() {
+            document.getElementById('rulesModal').classList.add('active');
+            loadRules();
+        }
+        
+        function hideRulesModal() {
+            document.getElementById('rulesModal').classList.remove('active');
+        }
+        
+        async function loadRules() {
+            try {
+                const response = await fetch('/api/rules');
+                const data = await response.json();
+                const listEl = document.getElementById('rulesList');
+                
+                if (data.rules.length === 0) {
+                    listEl.innerHTML = '<p style="color:var(--text-light);">还没有设置规则，在下方添加一条吧～</p>';
+                    return;
+                }
+                
+                const typeLabels = {
+                    'domain': '🌐 域名',
+                    'url_contains': '🔗 URL包含',
+                    'title_contains': '📝 标题包含',
+                    'title_regex': '🔤 标题正则',
+                    'content_contains': '📄 正文包含'
+                };
+                
+                listEl.innerHTML = data.rules.map(rule => `
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem;border-bottom:1px solid var(--border);">
+                        <div>
+                            <strong>${rule.name}</strong>
+                            <span style="color:var(--text-light);font-size:0.85rem;">
+                                ${typeLabels[rule.rule_type] || rule.rule_type}: ${rule.pattern}
+                            </span>
+                            <br>
+                            <span style="font-size:0.85rem;">→ ${rule.tags.join(', ')}</span>
+                        </div>
+                        <button class="btn btn-sm btn-danger" onclick="deleteRule(${rule.id})">🗑️</button>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('加载规则失败:', error);
+            }
+        }
+        
+        async function addRule() {
+            const name = document.getElementById('ruleName').value;
+            const ruleType = document.getElementById('ruleType').value;
+            const pattern = document.getElementById('rulePattern').value;
+            const tagsStr = document.getElementById('ruleTags').value;
+            
+            if (!name || !pattern || !tagsStr) {
+                alert('请填写所有字段');
+                return;
+            }
+            
+            const tags = tagsStr.split(',').map(t => t.trim()).filter(t => t);
+            
+            try {
+                const response = await fetch('/api/rules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, rule_type: ruleType, pattern, tags })
+                });
+                
+                if (response.ok) {
+                    document.getElementById('ruleName').value = '';
+                    document.getElementById('rulePattern').value = '';
+                    document.getElementById('ruleTags').value = '';
+                    loadRules();
+                }
+            } catch (error) {
+                alert('添加规则失败：' + error.message);
+            }
+        }
+        
+        async function deleteRule(ruleId) {
+            if (!confirm('确定删除这条规则？')) return;
+            
+            try {
+                await fetch(`/api/rules/${ruleId}`, { method: 'DELETE' });
+                loadRules();
+            } catch (error) {
+                console.error('删除规则失败:', error);
+            }
+        }
+        
+        async function applyAllRules() {
+            if (!confirm('将所有规则应用到全部文章？这可能需要一些时间。')) return;
+            
+            try {
+                const response = await fetch('/api/rules/apply-all', { method: 'POST' });
+                const data = await response.json();
+                alert(`批量应用完成！\n共处理 ${data.total_articles} 篇文章\n更新了 ${data.updated} 篇\n添加了 ${data.total_tags_added} 个标签`);
+                loadTags();
+                loadArticles();
+            } catch (error) {
+                alert('批量应用失败：' + error.message);
+            }
+        }
+        
+        // ==================== 分享功能 ====================
+        
+        async function shareCurrentArticle() {
+            if (!currentReadingArticle) return;
+            
+            try {
+                const response = await fetch('/api/share', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ article_id: currentReadingArticle.id })
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    const shareUrl = window.location.origin + data.share_url;
+                    document.getElementById('shareUrl').value = shareUrl;
+                    document.getElementById('shareResultModal').classList.add('active');
+                }
+            } catch (error) {
+                alert('创建分享失败：' + error.message);
+            }
+        }
+        
+        function copyShareUrl() {
+            const input = document.getElementById('shareUrl');
+            input.select();
+            document.execCommand('copy');
+            alert('链接已复制到剪贴板！');
+        }
+        
+        // ==================== TTS 语音朗读 ====================
+        
+        function readArticleAloud() {
+            if (!currentReadingArticle) return;
+            
+            // 使用浏览器内置 Speech Synthesis API
+            if (!('speechSynthesis' in window)) {
+                alert('您的浏览器不支持语音朗读');
+                return;
+            }
+            
+            // 停止当前朗读
+            window.speechSynthesis.cancel();
+            
+            const text = currentReadingArticle.title + '。' + 
+                currentReadingArticle.content
+                    .replace(/<[^>]+>/g, '')
+                    .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+                    .substring(0, 5000); // 限制长度
+            
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'zh-CN';
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+            
+            window.speechSynthesis.speak(utterance);
+        }
+        
+        // ==================== 字体大小控制 ====================
+        
+        function increaseFontSize() {
+            currentFontSize = Math.min(currentFontSize + 0.1, 2.0);
+            updateReadingFontSize();
+        }
+        
+        function decreaseFontSize() {
+            currentFontSize = Math.max(currentFontSize - 0.1, 0.8);
+            updateReadingFontSize();
+        }
+        
+        function updateReadingFontSize() {
+            const body = document.querySelector('.reading-content .article-body');
+            if (body) {
+                body.style.fontSize = currentFontSize + 'rem';
+            }
+        }
+
+    <!-- ESC 键关闭模态框 -->
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            hideAddModal();
+            closeReadingView();
+            document.getElementById('tagSidebar').classList.remove('active');
+            document.getElementById('importModal').classList.remove('active');
+            document.getElementById('rulesModal').classList.remove('active');
+        }
+    });
     </script>
+
+    <!-- 导入模态框 -->
+    <div class="modal-overlay" id="importModal">
+        <div class="modal">
+            <h2>📥 导入文章</h2>
+            <p style="color:var(--text-light);margin-bottom:1rem;">支持从其他稍后阅读服务导入数据</p>
+            <div style="display:flex;flex-direction:column;gap:0.5rem;">
+                <label style="font-weight:600;">选择来源：</label>
+                <select id="importSource" class="sort-select">
+                    <option value="pocket">Pocket (CSV)</option>
+                    <option value="wallabag">Wallabag (JSON)</option>
+                    <option value="bookmarks">浏览器书签 (HTML)</option>
+                    <option value="instapaper">Instapaper (CSV)</option>
+                </select>
+                <label style="font-weight:600;margin-top:0.5rem;">选择文件：</label>
+                <input type="file" id="importFile" accept=".csv,.json,.html">
+                <p id="importStatus" style="color:var(--text-light);font-size:0.85rem;margin-top:0.5rem;"></p>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-ghost" onclick="hideImportModal()">取消</button>
+                <button class="btn btn-primary" onclick="doImport()">开始导入</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 标签规则模态框 -->
+    <div class="modal-overlay" id="rulesModal">
+        <div class="modal" style="max-width:600px;">
+            <h2>⚙️ 自动标签规则</h2>
+            <p style="color:var(--text-light);margin-bottom:1rem;">设置规则后，新保存的文章会自动打上匹配的标签</p>
+
+            <!-- 规则列表 -->
+            <div id="rulesList" style="max-height:300px;overflow-y:auto;margin-bottom:1rem;">
+                <p style="color:var(--text-light);">加载中...</p>
+            </div>
+
+            <!-- 添加规则表单 -->
+            <div style="border-top:1px solid var(--border);padding-top:1rem;">
+                <h3 style="margin-bottom:0.5rem;">➕ 添加新规则</h3>
+                <input type="text" id="ruleName" placeholder="规则名称（如：知乎文章）">
+                <select id="ruleType" class="sort-select" style="width:100%;margin-bottom:0.5rem;">
+                    <option value="domain">域名匹配</option>
+                    <option value="url_contains">URL 包含</option>
+                    <option value="title_contains">标题包含关键词</option>
+                    <option value="title_regex">标题正则匹配</option>
+                    <option value="content_contains">正文包含关键词</option>
+                </select>
+                <input type="text" id="rulePattern" placeholder="匹配模式（如：zhihu.com）">
+                <input type="text" id="ruleTags" placeholder="自动添加的标签（逗号分隔）">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-ghost" onclick="applyAllRules()">🔄 批量应用</button>
+                <button class="btn btn-ghost" onclick="hideRulesModal()">关闭</button>
+                <button class="btn btn-primary" onclick="addRule()">添加规则</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 分享结果弹窗 -->
+    <div class="modal-overlay" id="shareResultModal">
+        <div class="modal">
+            <h2>🔗 分享链接</h2>
+            <p style="margin-bottom:1rem;">复制以下链接分享给他人：</p>
+            <input type="text" id="shareUrl" readonly onclick="this.select()" style="font-family:monospace;">
+            <div class="modal-actions">
+                <button class="btn btn-primary" onclick="copyShareUrl()">📋 复制链接</button>
+                <button class="btn btn-ghost" onclick="document.getElementById('shareResultModal').classList.remove('active')">关闭</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
