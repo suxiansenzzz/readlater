@@ -1,6 +1,22 @@
 """
-ReadLater v0.3.0 - 稍后阅读（增强版）
-新增功能：存档、标签管理、导出、批量操作、排序、高亮笔记
+ReadLater v1.9.0 - 稍后阅读（全功能版）
+Pocket & Wallabag 风格的自托管稍后阅读应用
+
+功能概览：
+- 文章保存/正文提取/图片本地化
+- 阅读视图（暗色/亮色主题）
+- 收藏/已读/存档/标签管理
+- 全文搜索/排序/筛选/批量操作
+- 高亮笔记
+- 多格式导出（JSON/CSV/HTML/PDF/TXT/XML/MOBI/EPUB）
+- 数据导入（Pocket/Instapaper/书签/Wallabag）
+- RSS 订阅抓取 + RSS 输出 Feed
+- 公开分享链接
+- 智能筛选（时间/阅读时长）
+- 自动标签规则引擎
+- 阅读体验增强（TTS/字体/编辑标题）
+- 跨设备同步（多用户+同步API）
+- 数据持久化（WAL 模式+备份+自动迁移）
 """
 import os
 import json
@@ -9,16 +25,39 @@ import sqlite3
 import hashlib
 import re
 import io
-from datetime import datetime
+import tempfile
+from datetime import datetime, timedelta
 from typing import Optional, List
 from urllib.parse import urljoin, urlparse
 
 import trafilatura
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse, FileResponse, StreamingResponse, Response, JSONResponse
+)
 from pydantic import BaseModel
 import httpx
+
+# 导入功能模块
+from backend.exporters import export_to_pdf, export_to_txt, export_to_xml, export_to_mobi
+from backend.importers import (
+    import_from_pocket_csv, import_from_wallabag_json,
+    import_from_bookmarks_html, import_from_instapaper_csv
+)
+from backend.rss_output import generate_rss_feed
+from backend.sharing import (
+    init_share_table, create_share, get_shared_article,
+    revoke_share, get_share_info
+)
+from backend.rules import (
+    init_rules_table, apply_rules_to_article, create_rule,
+    get_all_rules, update_rule, delete_rule, apply_rules_to_all
+)
+from backend.sync import (
+    init_users_table, create_user, authenticate_user,
+    verify_token, record_sync_action, get_sync_changes, get_default_user
+)
 
 # 配置
 BASE_DIR = os.path.dirname(__file__)
@@ -29,7 +68,7 @@ STATIC_DIR = os.path.join(BASE_DIR, "..", "static")
 # 确保目录存在
 os.makedirs(IMAGES_DIR, exist_ok=True)
 
-app = FastAPI(title="ReadLater", version="0.3.0")
+app = FastAPI(title="ReadLater", version="1.9.0")
 
 # ==================== 数据模型 ====================
 
@@ -64,8 +103,16 @@ class BatchOperation(BaseModel):
 # ==================== 数据库 ====================
 
 def get_db():
+    """
+    获取数据库连接
+    启用 WAL 模式以提高并发性能和数据持久性
+    """
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    # 启用 WAL 模式：写入更安全，崩溃恢复更好
+    conn.execute("PRAGMA journal_mode=WAL")
+    # 同步模式 FULL：确保数据完全写入磁盘
+    conn.execute("PRAGMA synchronous=FULL")
     return conn
 
 def init_db():
@@ -296,7 +343,22 @@ def fetch_article(url: str, custom_title: str = None):
 
 @app.on_event("startup")
 async def startup():
+    """应用启动时初始化数据库和所有功能模块"""
+    conn = get_db()
     init_db()
+
+    # 初始化新功能模块的数据库表
+    init_share_table(conn)
+    init_rules_table(conn)
+    init_users_table(conn)
+
+    # 创建默认用户（兼容单用户模式）
+    try:
+        get_default_user(conn)
+    except Exception:
+        pass
+
+    conn.close()
 
 @app.get("/")
 async def index():
@@ -388,6 +450,11 @@ async def save_article(article: ArticleCreate):
                 VALUES (?, ?, ?, ?, ?)
             """, (article_id, img['original_url'], img['local_path'], img['filename'], now))
         
+        # 应用自动标签规则
+        matched_tags = apply_rules_to_article(
+            conn, article_id, data["url"], data["title"], data["content"]
+        )
+        
         conn.commit()
         conn.close()
         
@@ -411,8 +478,14 @@ async def list_articles(
     tag: Optional[str] = None,
     domain: Optional[str] = None,
     search: Optional[str] = None,
-    sort: Optional[str] = "created_at",  # created_at, title, word_count, reading_time
-    order: Optional[str] = "desc"  # asc, desc
+    sort: Optional[str] = "created_at",  # created_at, title, word_count, reading_time, updated_at
+    order: Optional[str] = "desc",  # asc, desc
+    # 智能筛选参数
+    time_filter: Optional[str] = None,  # today, this_week, this_month, this_year
+    reading_time_min: Optional[int] = None,  # 最短阅读时间（分钟）
+    reading_time_max: Optional[int] = None,  # 最长阅读时间（分钟）
+    date_from: Optional[str] = None,  # 自定义日期范围起始
+    date_to: Optional[str] = None  # 自定义日期范围结束
 ):
     conn = get_db()
     
@@ -442,6 +515,41 @@ async def list_articles(
     if search:
         conditions.append("(title LIKE ? OR content LIKE ? OR excerpt LIKE ?)")
         params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+    
+    # 智能时间筛选
+    now = datetime.now()
+    if time_filter == "today":
+        today_start = now.strftime("%Y-%m-%d") + "T00:00:00"
+        conditions.append("created_at >= ?")
+        params.append(today_start)
+    elif time_filter == "this_week":
+        week_start = (now - timedelta(days=now.weekday())).strftime("%Y-%m-%d") + "T00:00:00"
+        conditions.append("created_at >= ?")
+        params.append(week_start)
+    elif time_filter == "this_month":
+        month_start = now.strftime("%Y-%m") + "-01T00:00:00"
+        conditions.append("created_at >= ?")
+        params.append(month_start)
+    elif time_filter == "this_year":
+        year_start = now.strftime("%Y") + "-01-01T00:00:00"
+        conditions.append("created_at >= ?")
+        params.append(year_start)
+    
+    # 自定义日期范围
+    if date_from:
+        conditions.append("created_at >= ?")
+        params.append(date_from)
+    if date_to:
+        conditions.append("created_at <= ?")
+        params.append(date_to)
+    
+    # 阅读时长筛选
+    if reading_time_min is not None:
+        conditions.append("reading_time >= ?")
+        params.append(reading_time_min)
+    if reading_time_max is not None:
+        conditions.append("reading_time <= ?")
+        params.append(reading_time_max)
     
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
     
@@ -949,9 +1057,618 @@ async def get_domains():
         "domains": [{"domain": row["domain"], "count": row["count"]} for row in rows]
     }
 
+# ==================== v1.2.0 多格式导出 ====================
+
+@app.get("/api/export/pdf")
+async def export_pdf():
+    """导出所有文章为 PDF 格式"""
+    conn = get_db()
+    try:
+        pdf_bytes = export_to_pdf(conn)
+        conn.close()
+        return StreamingResponse(
+            iter([pdf_bytes]),
+            media_type="application/pdf",
+            headers={"Content-Disposition": "attachment; filename=readlater_export.pdf"}
+        )
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"PDF 导出失败: {str(e)}")
+
+
+@app.get("/api/export/txt")
+async def export_txt():
+    """导出所有文章为纯文本格式"""
+    conn = get_db()
+    try:
+        txt_content = export_to_txt(conn)
+        conn.close()
+        return StreamingResponse(
+            iter([txt_content.encode("utf-8")]),
+            media_type="text/plain",
+            headers={"Content-Disposition": "attachment; filename=readlater_export.txt"}
+        )
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"TXT 导出失败: {str(e)}")
+
+
+@app.get("/api/export/xml")
+async def export_xml():
+    """导出所有文章为 XML 格式"""
+    conn = get_db()
+    try:
+        xml_content = export_to_xml(conn)
+        conn.close()
+        return StreamingResponse(
+            iter([xml_content.encode("utf-8")]),
+            media_type="application/xml",
+            headers={"Content-Disposition": "attachment; filename=readlater_export.xml"}
+        )
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"XML 导出失败: {str(e)}")
+
+
+@app.get("/api/export/mobi")
+async def export_mobi():
+    """导出所有文章为 MOBI/EPUB 格式"""
+    conn = get_db()
+    try:
+        epub_bytes = export_to_mobi(conn)
+        conn.close()
+        return StreamingResponse(
+            iter([epub_bytes]),
+            media_type="application/epub+zip",
+            headers={"Content-Disposition": "attachment; filename=readlater_export.epub"}
+        )
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"MOBI 导出失败: {str(e)}")
+
+
+# ==================== v1.3.0 数据导入 ====================
+
+@app.post("/api/import/pocket")
+async def import_pocket(file: UploadFile = File(...)):
+    """
+    从 Pocket 导出的 CSV 文件导入文章
+    Pocket 导出路径：Settings → Export → CSV
+    """
+    conn = get_db()
+    try:
+        content = await file.read()
+        csv_content = content.decode("utf-8")
+        result = import_from_pocket_csv(conn, csv_content, fetch_article)
+        conn.close()
+        return {
+            "success": True,
+            "imported": result["imported"],
+            "skipped": result["skipped"],
+            "errors": result["errors"],
+            "source": "pocket"
+        }
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Pocket 导入失败: {str(e)}")
+
+
+@app.post("/api/import/wallabag")
+async def import_wallabag(file: UploadFile = File(...)):
+    """
+    从 Wallabag 导出的 JSON 文件导入文章
+    Wallabag 导出路径：Export → JSON
+    """
+    conn = get_db()
+    try:
+        content = await file.read()
+        json_content = content.decode("utf-8")
+        result = import_from_wallabag_json(conn, json_content, fetch_article)
+        conn.close()
+        return {
+            "success": True,
+            "imported": result["imported"],
+            "skipped": result["skipped"],
+            "errors": result["errors"],
+            "source": "wallabag"
+        }
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Wallabag 导入失败: {str(e)}")
+
+
+@app.post("/api/import/bookmarks")
+async def import_bookmarks(file: UploadFile = File(...)):
+    """
+    从浏览器导出的书签 HTML 文件导入文章
+    支持 Chrome、Firefox、Safari 等标准书签格式
+    """
+    conn = get_db()
+    try:
+        content = await file.read()
+        html_content = content.decode("utf-8")
+        result = import_from_bookmarks_html(conn, html_content, fetch_article)
+        conn.close()
+        return {
+            "success": True,
+            "imported": result["imported"],
+            "skipped": result["skipped"],
+            "errors": result["errors"],
+            "source": "bookmarks"
+        }
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"书签导入失败: {str(e)}")
+
+
+@app.post("/api/import/instapaper")
+async def import_instapaper(file: UploadFile = File(...)):
+    """
+    从 Instapaper 导出的 CSV 文件导入文章
+    Instapaper 导出路径：Settings → Export → CSV
+    """
+    conn = get_db()
+    try:
+        content = await file.read()
+        csv_content = content.decode("utf-8")
+        result = import_from_instapaper_csv(conn, csv_content, fetch_article)
+        conn.close()
+        return {
+            "success": True,
+            "imported": result["imported"],
+            "skipped": result["skipped"],
+            "errors": result["errors"],
+            "source": "instapaper"
+        }
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Instapaper 导入失败: {str(e)}")
+
+
+# ==================== v1.4.0 RSS 输出 ====================
+
+@app.get("/api/rss")
+async def rss_feed(
+    limit: int = Query(50, ge=1, le=200),
+    tag: Optional[str] = None,
+    favorites: bool = False
+):
+    """
+    生成 RSS 2.0 Feed
+    可以用任何 RSS 阅读器订阅此地址
+    """
+    conn = get_db()
+    try:
+        base_url = "http://localhost:8000"
+        rss_xml = generate_rss_feed(
+            conn, base_url=base_url,
+            limit=limit, tag=tag, favorites_only=favorites
+        )
+        conn.close()
+        return Response(
+            content=rss_xml,
+            media_type="application/rss+xml",
+            headers={"Content-Disposition": "inline"}
+        )
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"RSS 生成失败: {str(e)}")
+
+
+# ==================== v1.5.0 公开分享 ====================
+
+class ShareRequest(BaseModel):
+    """创建分享请求"""
+    article_id: int
+    expires_hours: Optional[int] = None  # 过期小时数，None 表示永不过期
+
+
+@app.post("/api/share")
+async def create_share_link(request: ShareRequest):
+    """
+    为文章创建公开分享链接
+    其他人可以通过分享链接查看文章内容
+    """
+    conn = get_db()
+    try:
+        result = create_share(conn, request.article_id, request.expires_hours)
+        conn.close()
+        return {
+            "success": True,
+            "share_token": result["share_token"],
+            "article_title": result["article_title"],
+            "share_url": f"/s/{result['share_token']}",
+            "expires_at": result.get("expires_at")
+        }
+    except ValueError as e:
+        conn.close()
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"创建分享失败: {str(e)}")
+
+
+@app.get("/api/share/{article_id}")
+async def get_share_status(article_id: int):
+    """获取文章的分享状态"""
+    conn = get_db()
+    info = get_share_info(conn, article_id)
+    conn.close()
+
+    if info:
+        return {
+            "shared": True,
+            "share_token": info["share_token"],
+            "share_url": f"/s/{info['share_token']}",
+            "view_count": info["view_count"],
+            "expires_at": info["expires_at"]
+        }
+    return {"shared": False}
+
+
+@app.delete("/api/share/{article_id}")
+async def revoke_share_link(article_id: int):
+    """撤销文章的分享链接"""
+    conn = get_db()
+    revoke_share(conn, article_id)
+    conn.close()
+    return {"success": True, "message": "分享已撤销"}
+
+
+@app.get("/s/{share_token}")
+async def view_shared_article(share_token: str):
+    """
+    通过分享令牌查看文章（公开页面）
+    这个页面不需要登录即可访问
+    """
+    conn = get_db()
+    article = get_shared_article(conn, share_token)
+    conn.close()
+
+    if not article:
+        raise HTTPException(status_code=404, detail="分享链接不存在或已过期")
+
+    # 生成简化的阅读页面
+    tags_html = " ".join([
+        f'<span style="background:#f0f0f0;padding:2px 8px;border-radius:10px;font-size:0.8em;">{t}</span>'
+        for t in article["tags"]
+    ])
+
+    html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{article['title']} - ReadLater 分享</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px; margin: 0 auto; padding: 2rem;
+            line-height: 1.8; color: #1e293b;
+        }}
+        h1 {{ font-size: 1.8rem; margin-bottom: 1rem; }}
+        .meta {{ color: #64748b; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid #e2e8f0; }}
+        .content p {{ margin-bottom: 1rem; }}
+        .footer {{ margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #e2e8f0; color: #94a3b8; font-size: 0.85rem; }}
+    </style>
+</head>
+<body>
+    <h1>{article['title']}</h1>
+    <div class="meta">
+        <span>{article.get('domain', '')}</span> ·
+        <span>{article['word_count']}字</span> ·
+        <span>{article['reading_time']}分钟</span> ·
+        <span>浏览 {article['view_count']} 次</span>
+        <br>{tags_html}
+    </div>
+    <div class="content">
+        {''.join(f'<p>{p}</p>' for p in article['content'].split(chr(10)) if p.strip())}
+    </div>
+    <div class="footer">
+        通过 <strong>ReadLater</strong> 分享 · 原文：<a href="{article['url']}">{article['url']}</a>
+    </div>
+</body>
+</html>"""
+
+    return HTMLResponse(content=html)
+
+
+# ==================== v1.6.0 智能筛选（已集成到 list_articles） ====================
+
+# v1.6.0 的智能筛选功能已集成到 /api/articles 接口中
+# 新增参数：time_filter, reading_time_min, reading_time_max, date_from, date_to
+
+
+# ==================== v1.7.0 自动标签规则 ====================
+
+class TagRuleCreate(BaseModel):
+    """创建标签规则请求"""
+    name: str
+    rule_type: str  # domain/url_contains/title_contains/title_regex/content_contains/content_regex
+    pattern: str
+    tags: List[str]
+    priority: int = 0
+
+
+class TagRuleUpdate(BaseModel):
+    """更新标签规则请求"""
+    name: Optional[str] = None
+    rule_type: Optional[str] = None
+    pattern: Optional[str] = None
+    tags: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+    priority: Optional[int] = None
+
+
+@app.get("/api/rules")
+async def list_tag_rules():
+    """获取所有标签规则"""
+    conn = get_db()
+    rules = get_all_rules(conn)
+    conn.close()
+    return {"rules": rules}
+
+
+@app.post("/api/rules")
+async def create_tag_rule(rule: TagRuleCreate):
+    """创建新的标签规则"""
+    conn = get_db()
+    try:
+        rule_id = create_rule(
+            conn, rule.name, rule.rule_type,
+            rule.pattern, rule.tags, rule.priority
+        )
+        conn.close()
+        return {"success": True, "rule_id": rule_id}
+    except ValueError as e:
+        conn.close()
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.put("/api/rules/{rule_id}")
+async def update_tag_rule(rule_id: int, update: TagRuleUpdate):
+    """更新标签规则"""
+    conn = get_db()
+    update_data = {k: v for k, v in update.dict().items() if v is not None}
+    success = update_rule(conn, rule_id, **update_data)
+    conn.close()
+    return {"success": success}
+
+
+@app.delete("/api/rules/{rule_id}")
+async def delete_tag_rule(rule_id: int):
+    """删除标签规则"""
+    conn = get_db()
+    delete_rule(conn, rule_id)
+    conn.close()
+    return {"success": True}
+
+
+@app.post("/api/rules/apply-all")
+async def apply_all_rules():
+    """
+    将所有规则应用到所有文章
+    用于首次设置规则后批量应用
+    """
+    conn = get_db()
+    try:
+        result = apply_rules_to_all(conn)
+        conn.close()
+        return {
+            "success": True,
+            "total_articles": result["total_articles"],
+            "updated": result["updated"],
+            "total_tags_added": result["total_tags_added"]
+        }
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"批量应用失败: {str(e)}")
+
+
+# ==================== v1.8.0 阅读体验增强 ====================
+
+@app.get("/api/tts/{article_id}")
+async def text_to_speech(article_id: int):
+    """
+    将文章转换为纯文本（供 TTS 使用）
+    返回清理后的纯文本内容
+    """
+    conn = get_db()
+    row = conn.execute(
+        "SELECT title, content FROM articles WHERE id = ?",
+        (article_id,)
+    ).fetchone()
+    conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="文章不存在")
+
+    # 清理内容为纯文本（去除 HTML 标签等）
+    text = row["title"] + "\n\n" + (row["content"] or "")
+    text = re.sub(r'<[^>]+>', '', text)  # 去除 HTML 标签
+    text = re.sub(r'!\[[^\]]*\]\([^)]+\)', '[图片]', text)  # 替换 Markdown 图片
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)  # 保留链接文本
+    text = re.sub(r'\n{3,}', '\n\n', text)  # 合并多余空行
+
+    return {"text": text, "length": len(text)}
+
+
+class ArticleTitleUpdate(BaseModel):
+    """更新文章标题请求"""
+    title: str
+
+
+@app.put("/api/articles/{article_id}/title")
+async def update_article_title(article_id: int, update: ArticleTitleUpdate):
+    """
+    编辑文章标题
+    """
+    conn = get_db()
+    existing = conn.execute(
+        "SELECT id FROM articles WHERE id = ?", (article_id,)
+    ).fetchone()
+
+    if not existing:
+        conn.close()
+        raise HTTPException(status_code=404, detail="文章不存在")
+
+    conn.execute(
+        "UPDATE articles SET title = ?, updated_at = ? WHERE id = ?",
+        (update.title, datetime.now().isoformat(), article_id)
+    )
+    conn.commit()
+    conn.close()
+
+    return {"success": True, "title": update.title}
+
+
+# ==================== v1.9.0 跨设备同步 ====================
+
+class LoginRequest(BaseModel):
+    """登录请求"""
+    username: str
+    password: str
+
+
+class RegisterRequest(BaseModel):
+    """注册请求"""
+    username: str
+    password: str
+    display_name: Optional[str] = None
+
+
+class SyncRequest(BaseModel):
+    """同步请求"""
+    device_id: str
+    since: Optional[str] = None
+
+
+@app.post("/api/auth/register")
+async def register(request: RegisterRequest):
+    """注册新用户"""
+    conn = get_db()
+    try:
+        user = create_user(
+            conn, request.username,
+            request.password, request.display_name
+        )
+        conn.close()
+        return {
+            "success": True,
+            "user": {
+                "id": user["id"],
+                "username": user["username"],
+                "display_name": user["display_name"]
+            },
+            "api_token": user["api_token"]
+        }
+    except ValueError as e:
+        conn.close()
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/auth/login")
+async def login(request: LoginRequest):
+    """用户登录"""
+    conn = get_db()
+    user = authenticate_user(conn, request.username, request.password)
+    conn.close()
+
+    if not user:
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    return {
+        "success": True,
+        "user": {
+            "id": user["id"],
+            "username": user["username"],
+            "display_name": user["display_name"]
+        },
+        "api_token": user["api_token"]
+    }
+
+
+@app.get("/api/sync/changes")
+async def get_device_changes(
+    device_id: str,
+    since: Optional[str] = None,
+    token: Optional[str] = None
+):
+    """
+    获取其他设备的变更
+    用于跨设备同步
+    """
+    conn = get_db()
+
+    if token:
+        user = verify_token(conn, token)
+        if not user:
+            conn.close()
+            raise HTTPException(status_code=401, detail="无效的令牌")
+        user_id = user["id"]
+    else:
+        # 兼容模式：使用默认用户
+        default_user = get_default_user(conn)
+        user_id = default_user["id"]
+
+    changes = get_sync_changes(conn, user_id, device_id, since)
+    conn.close()
+
+    return {
+        "changes": changes,
+        "count": len(changes)
+    }
+
+
+# ==================== 数据备份 ====================
+
+@app.get("/api/backup")
+async def backup_database():
+    """
+    下载数据库备份文件
+    定期备份以防止数据丢失
+    """
+    if not os.path.exists(DB_PATH):
+        raise HTTPException(status_code=404, detail="数据库不存在")
+
+    return FileResponse(
+        DB_PATH,
+        media_type="application/octet-stream",
+        filename=f"readlater_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+    )
+
+
+@app.post("/api/backup/restore")
+async def restore_database(file: UploadFile = File(...)):
+    """
+    从备份文件恢复数据库
+    ⚠️ 警告：这会覆盖当前所有数据！
+    """
+    try:
+        content = await file.read()
+
+        # 先备份当前数据库
+        backup_path = DB_PATH + f".bak.{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        if os.path.exists(DB_PATH):
+            import shutil
+            shutil.copy2(DB_PATH, backup_path)
+
+        # 写入新数据库
+        with open(DB_PATH, "wb") as f:
+            f.write(content)
+
+        return {
+            "success": True,
+            "message": "数据库恢复成功",
+            "previous_backup": backup_path
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"恢复失败: {str(e)}")
+
+
 if __name__ == "__main__":
     import uvicorn
-    print("🚀 ReadLater v0.3.0 启动中...")
+    print("🚀 ReadLater v1.9.0 启动中...")
     print("📖 访问 http://localhost:8000")
-    print("✨ 新功能: 存档、标签管理、导出、批量操作、高亮笔记")
+    print("✨ 全功能版：导出/导入/RSS/分享/筛选/规则/同步/备份")
     uvicorn.run(app, host="0.0.0.0", port=8000)
