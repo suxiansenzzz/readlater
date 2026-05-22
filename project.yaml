@@ -1,0 +1,37 @@
+spec_version: "2.1"
+app_id: "com.readlater.app"
+version: "0.1.0"
+support_arch:
+  - amd64
+  - arm64
+tag_types:
+  - utility
+port: 8000
+proxy_path: "api"
+open_type: "inner"
+start_cmd: "python3 main.py"
+depend_fw_version: "1.13.0"
+permissions:
+  - "SYSTEM.EXEC_SYSTEM_COMMAND"
+  - "NETWORK.ACCESS_INTERNET"
+parameters:
+  - key: "DATA_DIR"
+    type: "string"
+    required: false
+    changeable: true
+    i18n:
+      zh-CN:
+        name: "数据目录"
+        description: "存储文章数据的目录"
+      en-US:
+        name: "Data Directory"
+        description: "Directory for storing articles"
+i18n:
+  zh-CN:
+    name: "稍后阅读"
+    description: "一键保存网页，稍后慢慢阅读。支持全文抓取、离线阅读、标签管理。"
+    author: "ReadLater Team"
+  en-US:
+    name: "ReadLater"
+    description: "Save web pages to read later. Supports full-text capture, offline reading, and tag management."
+    author: "ReadLater Team"

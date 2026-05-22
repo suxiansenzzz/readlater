@@ -1,0 +1,42 @@
+# 版本控制
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 数据库和数据文件（运行时生成）
+*.db
+backend/readlater.db
+
+# 图片（运行时生成）
+backend/images/
+
+# 文档
+*.md
+LICENSE
+
+# 扩展（不需要在Docker中）
+extension/
+
+# 打包文件
+ugapp/
+*.upk
+
+# 临时文件
+*.tmp
+*.bak
+*~

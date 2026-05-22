@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  readlater:
+    build: .
+    image: readlater:latest
+    container_name: readlater
+    ports:
+      - "8000:8000"
+    volumes:
+      - readlater_data:/data
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+
+volumes:
+  readlater_data:
+    driver: local

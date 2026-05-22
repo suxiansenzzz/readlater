@@ -1,0 +1,12 @@
+#!/bin/bash
+# ReadLater 启动脚本
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_DIR="$(dirname "$SCRIPT_DIR")"
+
+# 设置Python路径
+export PYTHONPATH="$APP_DIR:$PYTHONPATH"
+
+# 启动应用
+cd "$APP_DIR"
+python3 backend/main.py

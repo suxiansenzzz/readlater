@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# 数据库和数据文件
+*.db
+backend/readlater.db
+backend/images/
+
+# 分发/打包
+dist/
+build/
+*.egg-info/
+*.egg
+*.upk
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+
+# 临时文件
+*.tmp
+*.bak
+
+# 文档输出
+docs/_build/

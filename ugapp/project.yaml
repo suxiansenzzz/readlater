@@ -1,0 +1,58 @@
+# 绿联NAS应用配置
+spec_version: "2.1"
+app_id: "com.readlater.app"
+version: "0.1.0"
+support_arch:
+  - amd64
+  - arm64
+
+# 应用类型
+tag_types:
+  - utility
+
+# 应用名称和描述
+name: "稍后阅读"
+description: "一键保存网页，稍后慢慢阅读。支持全文抓取、离线阅读、标签管理。"
+
+# 服务端口
+port: 8000
+proxy_path: "api"
+
+# 打开方式（桌面窗口）
+open_type: "inner"
+
+# 启动命令
+start_cmd: "bin/readlater"
+
+# 依赖系统版本
+depend_fw_version: "1.13.0"
+
+# 权限声明
+permissions:
+  - "SYSTEM.EXEC_SYSTEM_COMMAND"
+  - "NETWORK.ACCESS_INTERNET"
+
+# 自定义配置
+parameters:
+  - key: "ADMIN_USER"
+    type: "string"
+    required: true
+    changeable: false
+    i18n:
+      zh-CN:
+        name: "管理员账号"
+        description: "用于登录管理界面"
+      en-US:
+        name: "Admin User"
+        description: "For login management"
+
+# 多语言
+i18n:
+  zh-CN:
+    name: "稍后阅读"
+    description: "一键保存网页，稍后慢慢阅读。支持全文抓取、离线阅读、标签管理。"
+    icon: "icon.png"
+  en-US:
+    name: "ReadLater"
+    description: "Save web pages to read later. Supports full-text capture, offline reading, and tag management."
+    icon: "icon.png"
