@@ -929,6 +929,115 @@ async def export_html():
         headers={"Content-Disposition": "attachment; filename=readlater_export.html"}
     )
 
+@app.get("/api/export/epub")
+async def export_epub():
+    """导出为 EPUB 格式"""
+    try:
+        import ebooklib
+        from ebooklib import epub
+    except ImportError:
+        raise HTTPException(status_code=500, detail="需要安装 ebooklib: pip install ebooklib")
+    
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM articles ORDER BY created_at DESC").fetchall()
+    conn.close()
+    
+    # 创建 EPUB 书籍
+    book = epub.EpubBook()
+    book.set_identifier('readlater-export-' + datetime.now().strftime('%Y%m%d'))
+    book.set_title('ReadLater 导出')
+    book.set_language('zh-CN')
+    book.add_author('ReadLater')
+    
+    # 添加 CSS 样式
+    style = epub.EpubItem(
+        uid="style",
+        file_name="style/default.css",
+        media_type="text/css",
+        content=b"""
+body { font-family: "Noto Serif SC", "Source Han Serif SC", serif; line-height: 1.8; }
+h1 { font-size: 1.5em; margin-bottom: 0.5em; }
+h2 { font-size: 1.3em; margin-top: 1.5em; margin-bottom: 0.5em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 1em; }
+.tags { display: inline-block; background: #f0f0f0; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; margin-right: 5px; }
+.content { text-align: justify; }
+"""
+    )
+    book.add_item(style)
+    
+    # 创建目录页
+    toc_content = '<html><head><link rel="stylesheet" href="style/default.css"/></head><body>'
+    toc_content += '<h1>📖 ReadLater 导出</h1>'
+    toc_content += f'<p>导出时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>'
+    toc_content += f'<p>共 {len(rows)} 篇文章</p>'
+    toc_content += '<h2>目录</h2><ul>'
+    
+    chapters = []
+    toc = []
+    
+    for i, row in enumerate(rows):
+        # 创建章节
+        chapter = epub.EpubHtml(
+            title=row['title'],
+            file_name=f'chapter_{i+1}.xhtml',
+            lang='zh-CN'
+        )
+        chapter.add_item(style)
+        
+        # 构建章节内容
+        tags = json.loads(row['tags'])
+        tags_html = ''.join([f'<span class="tags">{tag}</span>' for tag in tags])
+        
+        content = f"""<h1>{row['title']}</h1>
+<div class="meta">
+    <a href="{row['url']}">原文链接</a> · {row['created_at']} · {row['word_count']}字
+    {' · ✅已读' if row['is_read'] else ''}
+    {' · ⭐收藏' if row['is_favorite'] else ''}
+</div>
+<div class="tags-container">{tags_html}</div>
+<hr>
+<div class="content">
+{row['content']}
+</div>
+"""
+        chapter.content = content.encode('utf-8')
+        book.add_item(chapter)
+        chapters.append(chapter)
+        
+        # 添加到目录
+        toc.append(chapter)
+        toc_content += f'<li><a href="chapter_{i+1}.xhtml">{row["title"]}</a></li>'
+    
+    toc_content += '</ul></body></html>'
+    
+    # 创建目录页
+    toc_page = epub.EpubHtml(
+        title='目录',
+        file_name='toc.xhtml',
+        lang='zh-CN'
+    )
+    toc_page.add_item(style)
+    toc_page.content = toc_content.encode('utf-8')
+    book.add_item(toc_page)
+    
+    # 设置目录和 spine
+    book.toc = [toc_page] + toc
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = ['nav', toc_page] + chapters
+    
+    # 生成 EPUB 文件
+    import io
+    epub_buffer = io.BytesIO()
+    epub.write_epub(epub_buffer, book, {})
+    epub_buffer.seek(0)
+    
+    return StreamingResponse(
+        epub_buffer,
+        media_type="application/epub+zip",
+        headers={"Content-Disposition": "attachment; filename=readlater_export.epub"}
+    )
+
 # ==================== 统计信息 ====================
 
 @app.get("/api/stats")
