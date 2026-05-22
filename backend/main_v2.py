@@ -929,21 +929,24 @@ async def export_html():
         headers={"Content-Disposition": "attachment; filename=readlater_export.html"}
     )
 
-# ==================== 统计 ====================
+# ==================== 统计信息 ====================
 
 @app.get("/api/stats")
 async def get_stats():
     conn = get_db()
     
+    # 基础统计
     total = conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
     read = conn.execute("SELECT COUNT(*) FROM articles WHERE is_read = 1").fetchone()[0]
     unread = total - read
     favorites = conn.execute("SELECT COUNT(*) FROM articles WHERE is_favorite = 1").fetchone()[0]
     archived = conn.execute("SELECT COUNT(*) FROM articles WHERE is_archived = 1").fetchone()[0]
+    
+    # 图片和高亮
     images = conn.execute("SELECT COUNT(*) FROM images").fetchone()[0]
     highlights = conn.execute("SELECT COUNT(*) FROM highlights").fetchone()[0]
     
-    # 获取域名统计
+    # 域名统计
     domain_rows = conn.execute("""
         SELECT domain, COUNT(*) as count 
         FROM articles 
@@ -968,6 +971,129 @@ async def get_stats():
         "highlights": highlights,
         "total_words": total_words,
         "top_domains": [{"domain": row["domain"], "count": row["count"]} for row in domain_rows]
+    }
+
+@app.get("/api/stats/detailed")
+async def get_detailed_stats():
+    """获取详细的阅读统计"""
+    conn = get_db()
+    
+    # 按日期统计保存的文章
+    daily_saves = conn.execute("""
+        SELECT DATE(created_at) as date, COUNT(*) as count
+        FROM articles
+        WHERE created_at >= DATE('now', '-30 days')
+        GROUP BY DATE(created_at)
+        ORDER BY date
+    """).fetchall()
+    
+    # 按日期统计阅读的文章
+    daily_reads = conn.execute("""
+        SELECT DATE(updated_at) as date, COUNT(*) as count
+        FROM articles
+        WHERE is_read = 1 AND updated_at >= DATE('now', '-30 days')
+        GROUP BY DATE(updated_at)
+        ORDER BY date
+    """).fetchall()
+    
+    # 阅读速度分布
+    reading_time_dist = conn.execute("""
+        SELECT 
+            CASE 
+                WHEN reading_time <= 1 THEN '1分钟'
+                WHEN reading_time <= 3 THEN '3分钟'
+                WHEN reading_time <= 5 THEN '5分钟'
+                WHEN reading_time <= 10 THEN '10分钟'
+                ELSE '10分钟+'
+            END as time_range,
+            COUNT(*) as count
+        FROM articles
+        GROUP BY time_range
+        ORDER BY 
+            CASE time_range
+                WHEN '1分钟' THEN 1
+                WHEN '3分钟' THEN 2
+                WHEN '5分钟' THEN 3
+                WHEN '10分钟' THEN 4
+                ELSE 5
+            END
+    """).fetchall()
+    
+    # 标签统计
+    tag_stats = conn.execute("""
+        SELECT tags, COUNT(*) as count
+        FROM articles
+        WHERE tags != '[]'
+        GROUP BY tags
+        ORDER BY count DESC
+        LIMIT 20
+    """).fetchall()
+    
+    # 解析标签
+    tag_counts = {}
+    for row in tag_stats:
+        try:
+            tags = json.loads(row['tags'])
+            for tag in tags:
+                tag_counts[tag] = tag_counts.get(tag, 0) + row['count']
+        except:
+            pass
+    
+    # 月度统计
+    monthly_stats = conn.execute("""
+        SELECT 
+            STRFTIME('%Y-%m', created_at) as month,
+            COUNT(*) as saves,
+            SUM(CASE WHEN is_read = 1 THEN 1 ELSE 0 END) as reads,
+            SUM(word_count) as words
+        FROM articles
+        WHERE created_at >= DATE('now', '-12 months')
+        GROUP BY month
+        ORDER BY month
+    """).fetchall()
+    
+    # 阅读完成率
+    completion_rate = (read / total * 100) if total > 0 else 0
+    
+    # 平均文章字数
+    avg_words = conn.execute("SELECT AVG(word_count) FROM articles").fetchone()[0] or 0
+    
+    # 最活跃的域名
+    top_domains = conn.execute("""
+        SELECT domain, COUNT(*) as count, AVG(word_count) as avg_words
+        FROM articles
+        WHERE domain IS NOT NULL AND domain != ''
+        GROUP BY domain
+        ORDER BY count DESC
+        LIMIT 10
+    """).fetchall()
+    
+    conn.close()
+    
+    return {
+        "daily_saves": [{"date": row["date"], "count": row["count"]} for row in daily_saves],
+        "daily_reads": [{"date": row["date"], "count": row["count"]} for row in daily_reads],
+        "reading_time_distribution": [{"range": row["time_range"], "count": row["count"]} for row in reading_time_dist],
+        "tag_stats": [{"tag": tag, "count": count} for tag, count in sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)[:20]],
+        "monthly_stats": [
+            {
+                "month": row["month"],
+                "saves": row["saves"],
+                "reads": row["reads"],
+                "words": row["words"] or 0
+            }
+            for row in monthly_stats
+        ],
+        "completion_rate": round(completion_rate, 1),
+        "avg_words": round(avg_words),
+        "top_domains": [
+            {
+                "domain": row["domain"],
+                "count": row["count"],
+                "avg_words": round(row["avg_words"] or 0)
+            }
+            for row in top_domains
+        ]
     }
 
 # ==================== 域名列表 ====================
