@@ -1,9 +1,21 @@
-fastapi==0.115.0
-uvicorn==0.30.0
-trafilatura==2.0.0
-aiosqlite==0.20.0
-pydantic==2.9.0
-python-multipart==0.0.9
-httpx==0.27.0
-feedparser==6.0.11
-ebooklib==0.18
+# ReadLater v1.9.0 - 全功能版依赖
+# Web 框架
+fastapi>=0.100.0
+uvicorn>=0.20.0
+python-multipart>=0.0.6
+httpx>=0.24.0
+pydantic>=2.0.0
+
+# 文章抓取
+trafilatura>=1.6.0
+
+# RSS 订阅
+feedparser>=6.0.0
+
+# 多格式导出
+fpdf2>=2.7.0
+ebooklib>=0.18
+
+# HTML 解析（书签导入等）
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
