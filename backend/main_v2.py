@@ -990,6 +990,169 @@ async def get_domains():
         "domains": [{"domain": row["domain"], "count": row["count"]} for row in rows]
     }
 
+# ==================== RSS 订阅 ====================
+
+from backend.rss import get_rss_manager
+
+@app.post("/api/rss/subscribe")
+async def add_rss_subscription(feed: ArticleCreate):
+    """添加 RSS 订阅"""
+    rss = get_rss_manager(DB_PATH)
+    
+    try:
+        feed_id = await rss.add_subscription(
+            url=feed.url,
+            title=feed.title,
+            tags=feed.tags or []
+        )
+        return {"success": True, "feed_id": feed_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/rss/subscriptions")
+async def get_rss_subscriptions():
+    """获取所有 RSS 订阅"""
+    rss = get_rss_manager(DB_PATH)
+    return {"subscriptions": rss.get_subscriptions()}
+
+@app.put("/api/rss/subscriptions/{feed_id}")
+async def update_rss_subscription(feed_id: int, update: ArticleUpdate):
+    """更新 RSS 订阅"""
+    rss = get_rss_manager(DB_PATH)
+    
+    update_data = {}
+    if update.title is not None:
+        update_data['title'] = update.title
+    if update.tags is not None:
+        update_data['tags'] = update.tags
+    
+    rss.update_subscription(feed_id, **update_data)
+    return {"success": True}
+
+@app.delete("/api/rss/subscriptions/{feed_id}")
+async def delete_rss_subscription(feed_id: int):
+    """删除 RSS 订阅"""
+    rss = get_rss_manager(DB_PATH)
+    rss.delete_subscription(feed_id)
+    return {"success": True}
+
+@app.post("/api/rss/fetch/{feed_id}")
+async def fetch_rss_feed(feed_id: int):
+    """抓取 RSS 订阅的最新文章"""
+    rss = get_rss_manager(DB_PATH)
+    conn = get_db()
+    
+    # 获取订阅信息
+    subs = rss.get_subscriptions(active_only=False)
+    feed = next((s for s in subs if s['id'] == feed_id), None)
+    
+    if not feed:
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    
+    try:
+        # 解析 feed
+        feed_data = await rss.parse_feed(feed['url'])
+        saved_count = 0
+        
+        for item in feed_data['items']:
+            # 检查是否已保存
+            if rss.is_item_saved(feed_id, item.url):
+                continue
+            
+            # 检查文章库是否已有
+            existing = conn.execute(
+                "SELECT id FROM articles WHERE url = ?", (item.url,)
+            ).fetchone()
+            
+            if existing:
+                rss.mark_item_saved(feed_id, item.url, item.title)
+                continue
+            
+            # 抓取并保存文章
+            try:
+                data = fetch_article(item.url)
+                tags = list(set(feed['tags'] + item.tags))
+                now = datetime.now().isoformat()
+                
+                cursor = conn.execute("""
+                    INSERT INTO articles (url, title, content, excerpt, tags, created_at, word_count, reading_time, domain)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    data["url"], data["title"], data["content"], data["excerpt"],
+                    json.dumps(tags, ensure_ascii=False), now,
+                    data["word_count"], data["reading_time"], data.get("domain", "")
+                ))
+                
+                article_id = cursor.lastrowid
+                conn.commit()
+                
+                # 下载图片
+                images, updated_content = await download_article_images(
+                    data["html"], data["content"], data["url"], article_id
+                )
+                
+                if updated_content != data["content"]:
+                    conn.execute(
+                        "UPDATE articles SET content = ? WHERE id = ?",
+                        (updated_content, article_id)
+                    )
+                    conn.commit()
+                
+                for img in images:
+                    conn.execute("""
+                        INSERT INTO images (article_id, original_url, local_path, filename, created_at)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (article_id, img['original_url'], img['local_path'], img['filename'], now))
+                
+                conn.commit()
+                rss.mark_item_saved(feed_id, item.url, item.title)
+                saved_count += 1
+                
+            except Exception as e:
+                print(f"保存文章失败 {item.url}: {e}")
+                continue
+        
+        # 更新最后抓取时间
+        rss.update_subscription(feed_id, last_fetched=datetime.now().isoformat())
+        
+        conn.close()
+        return {"success": True, "saved_count": saved_count, "total_items": len(feed_data['items'])}
+        
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/rss/fetch-all")
+async def fetch_all_rss_feeds():
+    """抓取所有活跃订阅"""
+    rss = get_rss_manager(DB_PATH)
+    subscriptions = rss.get_subscriptions(active_only=True)
+    
+    results = []
+    for sub in subscriptions:
+        try:
+            result = await fetch_rss_feed(sub['id'])
+            results.append({
+                "feed_id": sub['id'],
+                "title": sub['title'],
+                **result
+            })
+        except Exception as e:
+            results.append({
+                "feed_id": sub['id'],
+                "title": sub['title'],
+                "success": False,
+                "error": str(e)
+            })
+    
+    return {"results": results}
+
+@app.get("/api/rss/stats")
+async def get_rss_stats():
+    """获取 RSS 统计"""
+    rss = get_rss_manager(DB_PATH)
+    return rss.get_stats()
+
 if __name__ == "__main__":
     import uvicorn
     print("🚀 ReadLater v0.3.0 启动中...")
