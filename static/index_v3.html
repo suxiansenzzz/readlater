@@ -610,6 +610,189 @@
             margin-bottom: 0.5rem;
         }
         
+        /* RSS 相关样式 */
+        .rss-form {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .rss-form input {
+            width: 100%;
+            padding: 0.5rem;
+            margin-bottom: 0.5rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+        
+        .btn-block {
+            width: 100%;
+            margin-top: 0.5rem;
+        }
+        
+        .rss-list {
+            padding: 1rem;
+            overflow-y: auto;
+            max-height: calc(100vh - 300px);
+        }
+        
+        .rss-item {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+        }
+        
+        .rss-info h4 {
+            font-size: 0.95rem;
+            margin-bottom: 0.25rem;
+        }
+        
+        .rss-info p {
+            font-size: 0.8rem;
+            color: var(--text-light);
+            word-break: break-all;
+            margin-bottom: 0.5rem;
+        }
+        
+        .rss-meta {
+            font-size: 0.75rem;
+            color: var(--text-light);
+        }
+        
+        .rss-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+        
+        .empty-message {
+            text-align: center;
+            color: var(--text-light);
+            padding: 2rem;
+        }
+        
+        /* 统计面板样式 */
+        .modal-lg {
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .stat-box {
+            background: var(--bg);
+            border-radius: 8px;
+            padding: 1rem;
+            text-align: center;
+        }
+        
+        .stat-box h4 {
+            font-size: 0.85rem;
+            color: var(--text-light);
+            margin-bottom: 0.5rem;
+        }
+        
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary);
+        }
+        
+        .stats-section {
+            margin-bottom: 1.5rem;
+        }
+        
+        .stats-section h4 {
+            margin-bottom: 1rem;
+            font-size: 1rem;
+        }
+        
+        .chart-container {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .chart-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .chart-label {
+            width: 60px;
+            font-size: 0.85rem;
+            color: var(--text-light);
+        }
+        
+        .chart-fill {
+            height: 20px;
+            background: linear-gradient(90deg, var(--primary), var(--primary-light));
+            border-radius: 4px;
+            min-width: 10px;
+        }
+        
+        .chart-value {
+            font-size: 0.85rem;
+            color: var(--text);
+        }
+        
+        .tag-cloud {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }
+        
+        .tag-item {
+            cursor: pointer;
+            color: var(--primary);
+            transition: color 0.2s;
+        }
+        
+        .tag-item:hover {
+            color: var(--primary-light);
+            text-decoration: underline;
+        }
+        
+        .domain-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .domain-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem;
+            background: var(--bg);
+            border-radius: 6px;
+        }
+        
+        .domain-name {
+            font-weight: 500;
+        }
+        
+        .domain-count, .domain-words {
+            font-size: 0.85rem;
+            color: var(--text-light);
+        }
+        
         /* 响应式 */
         @media (max-width: 768px) {
             .navbar {
@@ -650,6 +833,7 @@
         <h1>📖 稍后阅读</h1>
         <div class="navbar-actions">
             <button class="theme-toggle" onclick="toggleTheme()" title="切换主题">🌙</button>
+            <button class="btn btn-ghost" onclick="showStatsPanel()">📊 统计</button>
             <button class="btn btn-ghost" onclick="toggleSidebar()">🏷️ 标签</button>
             <div class="dropdown">
                 <button class="btn btn-ghost">📤 导出</button>
@@ -657,6 +841,7 @@
                     <a class="dropdown-item" href="/api/export/json" target="_blank">JSON 格式</a>
                     <a class="dropdown-item" href="/api/export/csv" target="_blank">CSV 格式</a>
                     <a class="dropdown-item" href="/api/export/html" target="_blank">HTML 格式</a>
+                    <a class="dropdown-item" href="/api/export/epub" target="_blank">EPUB 格式</a>
                 </div>
             </div>
             <button class="btn btn-primary" onclick="showAddModal()">➕ 添加文章</button>
@@ -743,6 +928,36 @@
         </div>
     </div>
     
+    <!-- RSS 订阅侧边栏 -->
+    <div class="sidebar" id="rssSidebar">
+        <div class="sidebar-header">
+            <h3>📡 RSS 订阅</h3>
+            <button class="btn btn-ghost btn-sm" onclick="toggleRSSSidebar()">✕</button>
+        </div>
+        <div class="rss-form">
+            <input type="url" id="rssUrl" placeholder="输入 RSS 链接...">
+            <input type="text" id="rssTags" placeholder="标签（用逗号分隔）">
+            <button class="btn btn-primary btn-block" onclick="addRSSSubscription()">➕ 添加订阅</button>
+            <button class="btn btn-ghost btn-block" onclick="fetchAllRSSFeeds()">🔄 抓取全部</button>
+        </div>
+        <div class="rss-list" id="rssContainer">
+            <!-- 动态生成 -->
+        </div>
+    </div>
+    
+    <!-- 统计面板 -->
+    <div class="modal-overlay" id="statsPanel">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h2>📊 阅读统计</h2>
+                <button class="btn btn-ghost btn-sm" onclick="hideStatsPanel()">✕</button>
+            </div>
+            <div class="stats-content" id="statsContainer">
+                <!-- 动态生成 -->
+            </div>
+        </div>
+    </div>
+    
     <!-- 添加文章模态框 -->
     <div class="modal-overlay" id="addModal">
         <div class="modal">
@@ -812,6 +1027,11 @@
         // 标签侧边栏
         function toggleSidebar() {
             document.getElementById('tagSidebar').classList.toggle('active');
+        }
+
+        // RSS 侧边栏
+        function toggleRSSSidebar() {
+            document.getElementById('rssSidebar').classList.toggle('active');
         }
 
         // 统计卡片筛选
@@ -1211,6 +1431,226 @@
                 document.getElementById('tagSidebar').classList.remove('active');
             }
         });
+
+        // ==================== RSS 订阅功能 ====================
+
+        let rssSubscriptions = [];
+
+        // 加载 RSS 订阅列表
+        async function loadRSSSubscriptions() {
+            try {
+                const response = await fetch('/api/rss/subscriptions');
+                const data = await response.json();
+                rssSubscriptions = data.subscriptions || [];
+                renderRSSSubscriptions();
+            } catch (error) {
+                console.error('加载 RSS 订阅失败:', error);
+            }
+        }
+
+        // 渲染 RSS 订阅列表
+        function renderRSSSubscriptions() {
+            const container = document.getElementById('rssContainer');
+            if (!container) return;
+
+            if (rssSubscriptions.length === 0) {
+                container.innerHTML = '<p class="empty-message">暂无 RSS 订阅</p>';
+                return;
+            }
+
+            container.innerHTML = rssSubscriptions.map(sub => `
+                <div class="rss-item" data-id="${sub.id}">
+                    <div class="rss-info">
+                        <h4>${sub.title || sub.url}</h4>
+                        <p>${sub.url}</p>
+                        <span class="rss-meta">
+                            ${sub.tags.map(t => `<span class="tag">${t}</span>`).join('')}
+                            ${sub.last_fetched ? ` · 最后抓取: ${new Date(sub.last_fetched).toLocaleDateString()}` : ''}
+                        </span>
+                    </div>
+                    <div class="rss-actions">
+                        <button class="btn btn-sm" onclick="fetchRSSFeed(${sub.id})">🔄 抓取</button>
+                        <button class="btn btn-sm btn-ghost" onclick="deleteRSSFeed(${sub.id})">🗑️</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 添加 RSS 订阅
+        async function addRSSSubscription() {
+            const url = document.getElementById('rssUrl').value;
+            const tagsStr = document.getElementById('rssTags').value;
+
+            if (!url) {
+                alert('请输入 RSS 链接');
+                return;
+            }
+
+            const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(t => t) : [];
+
+            try {
+                const response = await fetch('/api/rss/subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url, tags })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    document.getElementById('rssUrl').value = '';
+                    document.getElementById('rssTags').value = '';
+                    loadRSSSubscriptions();
+                } else {
+                    alert('添加失败：' + (data.detail || '未知错误'));
+                }
+            } catch (error) {
+                alert('添加失败：' + error.message);
+            }
+        }
+
+        // 抓取单个 RSS 订阅
+        async function fetchRSSFeed(feedId) {
+            try {
+                const response = await fetch(`/api/rss/fetch/${feedId}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    alert(`抓取完成！共 ${data.total_items} 篇，新增 ${data.saved_count} 篇`);
+                    loadArticles();
+                    loadStats();
+                } else {
+                    alert('抓取失败：' + (data.detail || '未知错误'));
+                }
+            } catch (error) {
+                alert('抓取失败：' + error.message);
+            }
+        }
+
+        // 抓取所有 RSS 订阅
+        async function fetchAllRSSFeeds() {
+            try {
+                const response = await fetch('/api/rss/fetch-all', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+
+                let totalSaved = 0;
+                data.results.forEach(r => {
+                    if (r.success) totalSaved += r.saved_count;
+                });
+
+                alert(`全部抓取完成！共新增 ${totalSaved} 篇文章`);
+                loadArticles();
+                loadStats();
+            } catch (error) {
+                alert('抓取失败：' + error.message);
+            }
+        }
+
+        // 删除 RSS 订阅
+        async function deleteRSSFeed(feedId) {
+            if (!confirm('确定要删除这个订阅吗？')) return;
+
+            try {
+                await fetch(`/api/rss/subscriptions/${feedId}`, {
+                    method: 'DELETE'
+                });
+                loadRSSSubscriptions();
+            } catch (error) {
+                alert('删除失败：' + error.message);
+            }
+        }
+
+        // ==================== 统计面板 ====================
+
+        // 加载详细统计
+        async function loadDetailedStats() {
+            try {
+                const response = await fetch('/api/stats/detailed');
+                const stats = await response.json();
+                renderStatsPanel(stats);
+            } catch (error) {
+                console.error('加载统计失败:', error);
+            }
+        }
+
+        // 渲染统计面板
+        function renderStatsPanel(stats) {
+            const container = document.getElementById('statsContainer');
+            if (!container) return;
+
+            container.innerHTML = `
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <h4>阅读完成率</h4>
+                        <div class="stat-value">${stats.completion_rate}%</div>
+                    </div>
+                    <div class="stat-box">
+                        <h4>平均字数</h4>
+                        <div class="stat-value">${stats.avg_words}</div>
+                    </div>
+                </div>
+
+                <div class="stats-section">
+                    <h4>📊 阅读时间分布</h4>
+                    <div class="chart-container">
+                        ${stats.reading_time_distribution.map(item => `
+                            <div class="chart-bar">
+                                <span class="chart-label">${item.range}</span>
+                                <div class="chart-fill" style="width: ${(item.count / Math.max(...stats.reading_time_distribution.map(i => i.count))) * 100}%"></div>
+                                <span class="chart-value">${item.count}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+
+                <div class="stats-section">
+                    <h4>🏷️ 热门标签</h4>
+                    <div class="tag-cloud">
+                        ${stats.tag_stats.slice(0, 15).map(item => `
+                            <span class="tag-item" style="font-size: ${Math.min(1.5, 0.8 + item.count / 5)}rem" onclick="setTagFilter('${item.tag}')">
+                                ${item.tag} (${item.count})
+                            </span>
+                        `).join('')}
+                    </div>
+                </div>
+
+                <div class="stats-section">
+                    <h4>🌐 热门网站</h4>
+                    <div class="domain-list">
+                        ${stats.top_domains.slice(0, 8).map(item => `
+                            <div class="domain-item">
+                                <span class="domain-name">${item.domain}</span>
+                                <span class="domain-count">${item.count} 篇</span>
+                                <span class="domain-words">平均 ${item.avg_words} 字</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        // 显示统计面板
+        function showStatsPanel() {
+            document.getElementById('statsPanel').classList.add('active');
+            loadDetailedStats();
+        }
+
+        // 隐藏统计面板
+        function hideStatsPanel() {
+            document.getElementById('statsPanel').classList.remove('active');
+        }
+
+        // ==================== 导出功能 ====================
+
+        // 导出文章
+        function exportArticles(format) {
+            const url = `/api/export/${format}`;
+            window.open(url, '_blank');
+        }
     </script>
 </body>
 </html>
