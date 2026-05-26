@@ -14,6 +14,7 @@ from urllib.parse import urljoin, urlparse
 
 import trafilatura
 import httpx
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -47,7 +48,16 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "readlater.db")
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
 IMAGES_DIR = os.path.join(os.path.dirname(__file__), "images")
 
-app = FastAPI(title="ReadLater", version="0.1.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理"""
+    init_db()
+    print("🚀 ReadLater 启动完成!")
+    print("📖 访问 http://localhost:8000")
+    yield
+    print("👋 ReadLater 关闭")
+
+app = FastAPI(title="ReadLater", version="2.5.0", lifespan=lifespan)
 
 # 添加CORS中间件，允许浏览器扩展跨域请求
 app.add_middleware(
@@ -92,6 +102,10 @@ def get_db():
     """获取数据库连接"""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    # WAL模式：写入更安全，崩溃恢复更好
+    conn.execute("PRAGMA journal_mode=WAL")
+    # FULL同步：确保数据完全写入磁盘
+    conn.execute("PRAGMA synchronous=FULL")
     return conn
 
 def init_db():
@@ -387,44 +401,59 @@ def is_article_image(url: str, base_url: str = None) -> bool:
     
     return True
 
-async def download_image(client: httpx.AsyncClient, url: str, article_id: int, base_url: str = None) -> Optional[str]:
-    """下载单张图片，支持防盗链和反爬虫"""
-    try:
-        # 使用反爬虫模块获取请求头
-        headers = get_headers(url)
-        
-        # 添加图片相关的Accept头
-        headers['Accept'] = 'image/webp,image/apng,image/*,*/*;q=0.8'
-        
-        # 添加Referer头（防盗链关键）
-        if base_url:
-            parsed_base = urlparse(base_url)
-            headers['Referer'] = f"{parsed_base.scheme}://{parsed_base.netloc}/"
-        
-        # 随机延迟（避免被检测为爬虫）
-        import random
-        import asyncio
-        await asyncio.sleep(random.uniform(0.1, 0.5))
-        
-        response = await client.get(url, timeout=15, follow_redirects=True, headers=headers)
-        if response.status_code == 200:
-            # 检查图片大小（过滤太小的图片）
-            content = response.content
-            if len(content) < 1024:  # 小于1KB的图片可能是追踪像素或图标
-                print(f"图片太小，跳过: {url} ({len(content)} bytes)")
+async def download_image(client: httpx.AsyncClient, url: str, article_id: int, base_url: str = None, max_retries: int = 2) -> Optional[str]:
+    """下载单张图片，支持防盗链、重试"""
+    import random
+    import asyncio
+    
+    for attempt in range(max_retries + 1):
+        try:
+            # 使用反爬虫模块获取请求头
+            headers = get_headers(url)
+            
+            # 添加图片相关的Accept头
+            headers['Accept'] = 'image/webp,image/apng,image/*,*/*;q=0.8'
+            
+            # 添加Referer头（防盗链关键）
+            if base_url:
+                parsed_base = urlparse(base_url)
+                headers['Referer'] = f"{parsed_base.scheme}://{parsed_base.netloc}/"
+            
+            # 随机延迟（避免被检测为爬虫）
+            await asyncio.sleep(random.uniform(0.1, 0.5))
+            
+            response = await client.get(url, timeout=15, follow_redirects=True, headers=headers)
+            if response.status_code == 200:
+                # 检查图片大小（过滤太小的图片）
+                content = response.content
+                if len(content) < 1024:  # 小于1KB的图片可能是追踪像素或图标
+                    print(f"图片太小，跳过: {url} ({len(content)} bytes)")
+                    return None
+                
+                url_hash = get_image_hash(url)
+                ext = get_image_extension(url, response.headers.get('content-type'))
+                filename = f"{url_hash}{ext}"
+                filepath = os.path.join(IMAGES_DIR, filename)
+                
+                with open(filepath, 'wb') as f:
+                    f.write(content)
+                
+                return filename
+            elif response.status_code in (403, 429) and attempt < max_retries:
+                wait = random.uniform(1, 3) * (attempt + 1)
+                print(f"图片下载 {response.status_code}，{wait:.1f}s后重试 ({attempt+1}/{max_retries}): {url[:80]}")
+                await asyncio.sleep(wait)
+                continue
+            else:
+                print(f"图片下载失败 HTTP {response.status_code}: {url[:80]}")
                 return None
-            
-            url_hash = get_image_hash(url)
-            ext = get_image_extension(url, response.headers.get('content-type'))
-            filename = f"{url_hash}{ext}"
-            filepath = os.path.join(IMAGES_DIR, filename)
-            
-            with open(filepath, 'wb') as f:
-                f.write(content)
-            
-            return filename
-    except Exception as e:
-        print(f"下载图片失败 {url}: {e}")
+        except Exception as e:
+            if attempt < max_retries:
+                wait = random.uniform(1, 2) * (attempt + 1)
+                print(f"图片下载异常，{wait:.1f}s后重试 ({attempt+1}/{max_retries}): {e}")
+                await asyncio.sleep(wait)
+            else:
+                print(f"下载图片失败 {url[:80]}: {e}")
     return None
 
 def extract_images_from_html(html: str, base_url: str) -> List[str]:
@@ -548,11 +577,6 @@ async def download_article_images(html: str, content: str, base_url: str, articl
 # 添加图片静态文件服务
 app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
 
-@app.on_event("startup")
-async def startup():
-    """应用启动时初始化数据库"""
-    init_db()
-
 @app.get("/")
 async def index():
     """返回前端页面"""
@@ -565,16 +589,15 @@ async def save_article(article: ArticleCreate):
     """保存文章"""
     conn = get_db()
     
-    # 检查是否已存在
-    existing = conn.execute(
-        "SELECT id FROM articles WHERE url = ?", (article.url,)
-    ).fetchone()
-    
-    if existing:
-        conn.close()
-        raise HTTPException(status_code=400, detail="该链接已保存")
-    
     try:
+        # 检查是否已存在
+        existing = conn.execute(
+            "SELECT id FROM articles WHERE url = ?", (article.url,)
+        ).fetchone()
+        
+        if existing:
+            raise HTTPException(status_code=400, detail="该链接已保存")
+        
         # 抓取文章
         data = fetch_article(article.url, article.title)
         
@@ -622,7 +645,6 @@ async def save_article(article: ArticleCreate):
             )
         
         conn.commit()
-        conn.close()
         
         return {
             "success": True,
@@ -630,24 +652,26 @@ async def save_article(article: ArticleCreate):
             "article_id": article_id,
             "images_count": len(images)
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        conn.close()
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
 
 @app.post("/api/articles/{article_id}/refetch")
 async def refetch_article(article_id: int):
     """重新抓取文章（重新获取内容和图片）"""
     conn = get_db()
     
-    # 获取现有文章
-    article = conn.execute("SELECT * FROM articles WHERE id = ?", (article_id,)).fetchone()
-    if not article:
-        conn.close()
-        raise HTTPException(status_code=404, detail="文章不存在")
-    
-    url = article['url']
-    
     try:
+        # 获取现有文章
+        article = conn.execute("SELECT * FROM articles WHERE id = ?", (article_id,)).fetchone()
+        if not article:
+            raise HTTPException(status_code=404, detail="文章不存在")
+        
+        url = article['url']
+        
         # 删除旧图片文件和记录
         old_images = conn.execute("SELECT filename FROM images WHERE article_id = ?", (article_id,)).fetchall()
         for img in old_images:
@@ -699,7 +723,6 @@ async def refetch_article(article_id: int):
             )
         
         conn.commit()
-        conn.close()
         
         return {
             "success": True,
@@ -708,43 +731,48 @@ async def refetch_article(article_id: int):
             "title": data["title"],
             "images_count": len(images)
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        conn.close()
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
 
 @app.get("/api/articles/{article_id}/images")
 async def get_article_images(article_id: int):
     """获取文章的图片列表"""
     conn = get_db()
     
-    # 检查文章是否存在
-    article = conn.execute(
-        "SELECT id FROM articles WHERE id = ?", (article_id,)
-    ).fetchone()
-    
-    if not article:
+    try:
+        # 检查文章是否存在
+        article = conn.execute(
+            "SELECT id FROM articles WHERE id = ?", (article_id,)
+        ).fetchone()
+        
+        if not article:
+            raise HTTPException(status_code=404, detail="文章不存在")
+        
+        # 获取图片列表
+        rows = conn.execute(
+            "SELECT * FROM images WHERE article_id = ? ORDER BY id",
+            (article_id,)
+        ).fetchall()
+        
+        images = []
+        for row in rows:
+            images.append({
+                "id": row["id"],
+                "original_url": row["original_url"],
+                "local_path": row["local_path"],
+                "filename": row["filename"],
+                "created_at": row["created_at"]
+            })
+        
+        return {"images": images}
+    except HTTPException:
+        raise
+    finally:
         conn.close()
-        raise HTTPException(status_code=404, detail="文章不存在")
-    
-    # 获取图片列表
-    rows = conn.execute(
-        "SELECT * FROM images WHERE article_id = ? ORDER BY id",
-        (article_id,)
-    ).fetchall()
-    
-    conn.close()
-    
-    images = []
-    for row in rows:
-        images.append({
-            "id": row["id"],
-            "original_url": row["original_url"],
-            "local_path": row["local_path"],
-            "filename": row["filename"],
-            "created_at": row["created_at"]
-        })
-    
-    return {"images": images}
 
 @app.get("/api/articles")
 async def list_articles(
@@ -756,12 +784,12 @@ async def list_articles(
     tag: Optional[str] = None,
     search: Optional[str] = None,
     sort: str = "created_at",
-    order: str = "desc"
+    order: str = "desc",
+    time_filter: Optional[str] = None,
+    reading_time_min: Optional[int] = None,
+    reading_time_max: Optional[int] = None
 ):
     """获取文章列表"""
-    # 调试信息
-    print(f"[DEBUG] sort={sort}, order={order}, page={page}, per_page={per_page}")
-    
     conn = get_db()
     
     # 构建查询
@@ -787,6 +815,36 @@ async def list_articles(
     if search:
         conditions.append("(title LIKE ? OR content LIKE ?)")
         params.extend([f"%{search}%", f"%{search}%"])
+    
+    # 智能时间筛选
+    if time_filter:
+        from datetime import date, timedelta
+        today = date.today()
+        if time_filter == "today":
+            conditions.append("created_at >= ?")
+            params.append(today.isoformat())
+        elif time_filter == "this_week":
+            # 本周一
+            monday = today - timedelta(days=today.weekday())
+            conditions.append("created_at >= ?")
+            params.append(monday.isoformat())
+        elif time_filter == "this_month":
+            first_day = today.replace(day=1)
+            conditions.append("created_at >= ?")
+            params.append(first_day.isoformat())
+        elif time_filter == "this_year":
+            first_day = today.replace(month=1, day=1)
+            conditions.append("created_at >= ?")
+            params.append(first_day.isoformat())
+    
+    # 阅读时间筛选
+    if reading_time_min is not None:
+        conditions.append("reading_time >= ?")
+        params.append(reading_time_min)
+    
+    if reading_time_max is not None:
+        conditions.append("reading_time <= ?")
+        params.append(reading_time_max)
     
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
     
@@ -871,65 +929,72 @@ async def update_article(article_id: int, update: ArticleUpdate):
     """更新文章"""
     conn = get_db()
     
-    # 检查文章是否存在
-    existing = conn.execute(
-        "SELECT id FROM articles WHERE id = ?", (article_id,)
-    ).fetchone()
-    
-    if not existing:
+    try:
+        # 检查文章是否存在
+        existing = conn.execute(
+            "SELECT id FROM articles WHERE id = ?", (article_id,)
+        ).fetchone()
+        
+        if not existing:
+            raise HTTPException(status_code=404, detail="文章不存在")
+        
+        # 构建更新语句
+        updates = []
+        params = []
+        
+        if update.title is not None:
+            updates.append("title = ?")
+            params.append(update.title)
+        
+        if update.tags is not None:
+            updates.append("tags = ?")
+            params.append(json.dumps(update.tags, ensure_ascii=False))
+        
+        if update.is_read is not None:
+            updates.append("is_read = ?")
+            params.append(1 if update.is_read else 0)
+        
+        if update.is_favorite is not None:
+            updates.append("is_favorite = ?")
+            params.append(1 if update.is_favorite else 0)
+        
+        if update.is_archived is not None:
+            updates.append("is_archived = ?")
+            params.append(1 if update.is_archived else 0)
+        
+        if updates:
+            params.append(article_id)
+            conn.execute(
+                f"UPDATE articles SET {', '.join(updates)} WHERE id = ?",
+                params
+            )
+            conn.commit()
+        
+        return {"success": True}
+    except HTTPException:
+        raise
+    finally:
         conn.close()
-        raise HTTPException(status_code=404, detail="文章不存在")
-    
-    # 构建更新语句
-    updates = []
-    params = []
-    
-    if update.title is not None:
-        updates.append("title = ?")
-        params.append(update.title)
-    
-    if update.tags is not None:
-        updates.append("tags = ?")
-        params.append(json.dumps(update.tags, ensure_ascii=False))
-    
-    if update.is_read is not None:
-        updates.append("is_read = ?")
-        params.append(1 if update.is_read else 0)
-    
-    if update.is_favorite is not None:
-        updates.append("is_favorite = ?")
-        params.append(1 if update.is_favorite else 0)
-    
-    if update.is_archived is not None:
-        updates.append("is_archived = ?")
-        params.append(1 if update.is_archived else 0)
-    
-    if updates:
-        params.append(article_id)
-        conn.execute(
-            f"UPDATE articles SET {', '.join(updates)} WHERE id = ?",
-            params
-        )
-        conn.commit()
-    
-    conn.close()
-    return {"success": True}
 
 @app.delete("/api/articles/{article_id}")
 async def delete_article(article_id: int):
     """删除文章"""
     conn = get_db()
     
-    result = conn.execute(
-        "DELETE FROM articles WHERE id = ?", (article_id,)
-    )
-    conn.commit()
-    conn.close()
-    
-    if result.rowcount == 0:
-        raise HTTPException(status_code=404, detail="文章不存在")
-    
-    return {"success": True}
+    try:
+        result = conn.execute(
+            "DELETE FROM articles WHERE id = ?", (article_id,)
+        )
+        conn.commit()
+        
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="文章不存在")
+        
+        return {"success": True}
+    except HTTPException:
+        raise
+    finally:
+        conn.close()
 
 @app.get("/api/stats")
 async def get_stats():
@@ -1022,16 +1087,15 @@ async def export_articles(format: str, article_ids: Optional[str] = None):
     """
     conn = get_db()
     
-    # 解析文章ID
-    ids = None
-    if article_ids:
-        try:
-            ids = [int(id.strip()) for id in article_ids.split(',') if id.strip()]
-        except ValueError:
-            conn.close()
-            raise HTTPException(status_code=400, detail="无效的文章ID格式")
-    
     try:
+        # 解析文章ID
+        ids = None
+        if article_ids:
+            try:
+                ids = [int(id.strip()) for id in article_ids.split(',') if id.strip()]
+            except ValueError:
+                raise HTTPException(status_code=400, detail="无效的文章ID格式")
+        
         if format == "pdf":
             data = export_to_pdf(conn, ids)
             media_type = "application/pdf"
@@ -1061,10 +1125,7 @@ async def export_articles(format: str, article_ids: Optional[str] = None):
             media_type = "application/xml"
             filename = f"readlater_export_{datetime.now().strftime('%Y%m%d_%H%M')}.xml"
         else:
-            conn.close()
             raise HTTPException(status_code=400, detail=f"不支持的导出格式: {format}")
-        
-        conn.close()
         
         # 返回文件流
         if isinstance(data, bytes):
@@ -1080,17 +1141,17 @@ async def export_articles(format: str, article_ids: Optional[str] = None):
                 headers={"Content-Disposition": f"attachment; filename={filename}"}
             )
     
+    except HTTPException:
+        raise
     except ImportError as e:
-        conn.close()
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        conn.close()
         raise HTTPException(status_code=500, detail=f"导出失败: {str(e)}")
+    finally:
+        conn.close()
 
 # ==================== 主程序 ====================
 
 if __name__ == "__main__":
     import uvicorn
-    print("🚀 ReadLater 启动中...")
-    print("📖 访问 http://localhost:8000")
     uvicorn.run(app, host="0.0.0.0", port=8000)
