@@ -610,36 +610,229 @@
             margin-bottom: 0.5rem;
         }
         
+        /* 汉堡菜单按钮 */
+        .hamburger {
+            display: none;
+            background: transparent;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0.5rem;
+            color: var(--text);
+        }
+        
+        /* 移动端添加按钮 */
+        #mobileAddBtn {
+            display: none;
+        }
+        
+        /* 移动端菜单抽屉 */
+        .mobile-menu {
+            display: none;
+            position: fixed;
+            top: 0;
+            right: -100%;
+            width: 80%;
+            max-width: 300px;
+            height: 100vh;
+            background: var(--card-bg);
+            z-index: 250;
+            padding: 1.5rem;
+            transition: right 0.3s ease;
+            overflow-y: auto;
+            box-shadow: -4px 0 20px rgba(0,0,0,0.15);
+        }
+        
+        .mobile-menu.active {
+            right: 0;
+        }
+        
+        .mobile-menu-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 240;
+        }
+        
+        .mobile-menu-overlay.active {
+            display: block;
+        }
+        
+        .mobile-menu-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .mobile-menu-items {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .mobile-menu-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            background: transparent;
+            border: none;
+            color: var(--text);
+            font-size: 1rem;
+            cursor: pointer;
+            text-align: left;
+            width: 100%;
+            transition: background 0.2s;
+        }
+        
+        .mobile-menu-item:hover {
+            background: var(--bg);
+        }
+        
         /* 响应式 */
         @media (max-width: 768px) {
             .navbar {
-                padding: 1rem;
+                padding: 0.75rem 1rem;
+            }
+            
+            .navbar h1 {
+                font-size: 1.2rem;
+            }
+            
+            .navbar-actions {
+                display: none;
+            }
+            
+            .hamburger {
+                display: block;
+            }
+            
+            #mobileAddBtn {
+                display: inline-flex !important;
+            }
+            
+            .mobile-menu {
+                display: block;
             }
             
             .container {
-                padding: 1rem;
+                padding: 0.75rem;
+                max-width: 100%;
             }
             
             .stats {
                 grid-template-columns: repeat(2, 1fr);
+                gap: 0.5rem;
+                margin-bottom: 1rem;
+            }
+            
+            .stat-card {
+                padding: 0.75rem 0.5rem;
+            }
+            
+            .stat-number {
+                font-size: 1.2rem;
+            }
+            
+            .stat-label {
+                font-size: 0.7rem;
             }
             
             .toolbar {
                 flex-direction: column;
+                gap: 0.5rem;
             }
             
             .search-input {
                 width: 100%;
+                min-width: unset;
+            }
+            
+            .sort-select {
+                width: 100%;
+            }
+            
+            .filters {
+                overflow-x: auto;
+                flex-wrap: nowrap;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+                gap: 0.4rem;
+                padding-bottom: 0.25rem;
+            }
+            
+            .filters::-webkit-scrollbar {
+                display: none;
+            }
+            
+            .filter-btn {
+                white-space: nowrap;
+                flex-shrink: 0;
             }
             
             .batch-bar {
                 flex-direction: column;
-                gap: 1rem;
+                gap: 0.75rem;
             }
             
             .sidebar {
                 width: 100%;
                 right: -100%;
+            }
+            
+            .reading-content {
+                padding: 1rem;
+            }
+            
+            .reading-header {
+                padding: 0.75rem 1rem;
+                flex-wrap: wrap;
+                gap: 0.5rem;
+            }
+            
+            .reading-content h1 {
+                font-size: 1.4rem;
+            }
+            
+            .article-card {
+                padding: 1rem;
+            }
+            
+            .article-title {
+                font-size: 1rem;
+            }
+            
+            /* 确保不出现水平滚动 */
+            html, body {
+                overflow-x: hidden;
+                width: 100%;
+            }
+            
+            * {
+                max-width: 100%;
+            }
+            
+            img {
+                max-width: 100% !important;
+                height: auto !important;
+            }
+            
+            table {
+                display: block;
+                overflow-x: auto;
+            }
+            
+            pre, code {
+                overflow-x: auto;
+                max-width: 100%;
             }
         }
     </style>
@@ -670,7 +863,52 @@
             </div>
             <button class="btn btn-primary" onclick="showAddModal()">➕ 添加文章</button>
         </div>
+        <!-- 移动端：汉堡菜单 + 添加按钮 -->
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+            <button class="btn btn-primary btn-sm" onclick="showAddModal()" style="display:none;" id="mobileAddBtn">➕</button>
+            <button class="hamburger" onclick="toggleMobileMenu()" id="hamburgerBtn">☰</button>
+        </div>
     </nav>
+    
+    <!-- 移动端菜单抽屉 -->
+    <div class="mobile-menu-overlay" id="mobileMenuOverlay" onclick="toggleMobileMenu()"></div>
+    <div class="mobile-menu" id="mobileMenu">
+        <div class="mobile-menu-header">
+            <h3>📖 菜单</h3>
+            <button class="btn btn-ghost btn-sm" onclick="toggleMobileMenu()">✕</button>
+        </div>
+        <div class="mobile-menu-items">
+            <button class="mobile-menu-item" onclick="toggleTheme();toggleMobileMenu()">
+                <span id="mobileThemeIcon">🌙</span> 切换主题
+            </button>
+            <button class="mobile-menu-item" onclick="showAddModal();toggleMobileMenu()">
+                ➕ 添加文章
+            </button>
+            <button class="mobile-menu-item" onclick="toggleSidebar();toggleMobileMenu()">
+                🏷️ 标签管理
+            </button>
+            <button class="mobile-menu-item" onclick="showRulesModal();toggleMobileMenu()">
+                ⚙️ 智能规则
+            </button>
+            <button class="mobile-menu-item" onclick="showImportModal();toggleMobileMenu()">
+                📥 导入数据
+            </button>
+            <a class="mobile-menu-item" href="/api/rss" target="_blank" onclick="toggleMobileMenu()" style="text-decoration:none;">
+                📡 RSS 订阅
+            </a>
+            <hr style="margin:0.5rem 0;border:none;border-top:1px solid var(--border);">
+            <div style="padding:0.5rem 1rem;color:var(--text-light);font-size:0.85rem;">📤 导出</div>
+            <a class="mobile-menu-item" href="/api/export/json" target="_blank" onclick="toggleMobileMenu()" style="text-decoration:none;">📄 JSON</a>
+            <a class="mobile-menu-item" href="/api/export/csv" target="_blank" onclick="toggleMobileMenu()" style="text-decoration:none;">📊 CSV</a>
+            <a class="mobile-menu-item" href="/api/export/html" target="_blank" onclick="toggleMobileMenu()" style="text-decoration:none;">🌐 HTML</a>
+            <a class="mobile-menu-item" href="/api/export/pdf" target="_blank" onclick="toggleMobileMenu()" style="text-decoration:none;">📕 PDF</a>
+            <a class="mobile-menu-item" href="/api/export/txt" target="_blank" onclick="toggleMobileMenu()" style="text-decoration:none;">📝 纯文本</a>
+            <a class="mobile-menu-item" href="/api/export/xml" target="_blank" onclick="toggleMobileMenu()" style="text-decoration:none;">📋 XML</a>
+            <a class="mobile-menu-item" href="/api/export/mobi" target="_blank" onclick="toggleMobileMenu()" style="text-decoration:none;">📚 EPUB</a>
+            <hr style="margin:0.5rem 0;border:none;border-top:1px solid var(--border);">
+            <a class="mobile-menu-item" href="/api/backup" target="_blank" onclick="toggleMobileMenu()" style="text-decoration:none;">💾 数据库备份</a>
+        </div>
+    </div>
     
     <!-- 主内容 -->
     <div class="container">
@@ -788,7 +1026,8 @@
                 <button class="action-btn" id="readingReadBtn" onclick="toggleReadingRead()">○</button>
                 <button class="action-btn" id="readingArchiveBtn" onclick="toggleReadingArchive()">📦</button>
                 <button class="action-btn" onclick="shareCurrentArticle()" title="分享">🔗</button>
-                <button class="action-btn" onclick="readArticleAloud()" title="语音朗读">🔊</button>
+                <button class="action-btn" id="ttsPlayBtn" onclick="toggleTTS()" title="语音朗读">🔊</button>
+                <button class="action-btn" id="ttsStopBtn" onclick="stopTTS()" title="停止朗读" style="display:none;">⏹️</button>
                 <button class="action-btn" onclick="decreaseFontSize()" title="缩小字体">A-</button>
                 <button class="action-btn" onclick="increaseFontSize()" title="放大字体">A+</button>
                 <a id="readingSourceLink" href="#" target="_blank" class="btn btn-ghost btn-sm">🔗 原文</a>
@@ -843,6 +1082,36 @@
         function toggleSidebar() {
             document.getElementById('tagSidebar').classList.toggle('active');
         }
+        
+        // 移动端菜单
+        function toggleMobileMenu() {
+            const menu = document.getElementById('mobileMenu');
+            const overlay = document.getElementById('mobileMenuOverlay');
+            menu.classList.toggle('active');
+            overlay.classList.toggle('active');
+            document.body.style.overflow = menu.classList.contains('active') ? 'hidden' : '';
+        }
+        
+        // 检测移动端并显示添加按钮
+        function checkMobile() {
+            const isMobile = window.innerWidth <= 768;
+            const mobileAddBtn = document.getElementById('mobileAddBtn');
+            const hamburgerBtn = document.getElementById('hamburgerBtn');
+            if (isMobile) {
+                mobileAddBtn.style.display = 'inline-flex';
+                hamburgerBtn.style.display = 'block';
+            } else {
+                mobileAddBtn.style.display = 'none';
+                hamburgerBtn.style.display = 'none';
+            }
+            // 更新移动端主题图标
+            const theme = document.documentElement.getAttribute('data-theme');
+            document.getElementById('mobileThemeIcon').textContent = theme === 'dark' ? '☀️' : '🌙';
+        }
+        
+        // 初始化时检测
+        window.addEventListener('resize', checkMobile);
+        document.addEventListener('DOMContentLoaded', checkMobile);
 
         // 统计卡片筛选
         function setStatFilter(filter, element) {
@@ -965,6 +1234,7 @@
                         <button class="action-btn archive-btn ${article.is_archived ? 'active' : ''}" onclick="toggleArchive(${article.id})" title="存档">
                             ${article.is_archived ? '📦' : '📥'}
                         </button>
+                        <button class="action-btn" onclick="refetchArticle(${article.id})" title="重新抓取">🔄</button>
                         <button class="action-btn" onclick="deleteArticle(${article.id})" title="删除">🗑️</button>
                     </div>
                 </div>
@@ -1111,6 +1381,54 @@
             }
         }
 
+        async function refetchArticle(id) {
+            if (!confirm('重新抓取这篇文章？会替换当前内容和图片。')) return;
+            
+            try {
+                const btn = event.target;
+                btn.textContent = '⏳';
+                btn.disabled = true;
+                
+                const response = await fetch(`/api/articles/${id}/refetch`, { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    btn.textContent = '✅';
+                    setTimeout(() => {
+                        loadArticles();
+                        // 如果正在阅读这篇文章，刷新阅读视图
+                        if (currentReadingArticle && currentReadingArticle.id === id) {
+                            openArticle(id);
+                        }
+                    }, 500);
+                } else {
+                    btn.textContent = '❌';
+                    alert('重新抓取失败: ' + (result.detail || '未知错误'));
+                    setTimeout(() => { btn.textContent = '🔄'; btn.disabled = false; }, 1500);
+                }
+            } catch (error) {
+                console.error('重新抓取失败:', error);
+                event.target.textContent = '🔄';
+                event.target.disabled = false;
+            }
+        }
+
+        // 格式化文章内容（处理Markdown图片语法）
+        function formatContent(content) {
+            if (!content) return '';
+            
+            // 将Markdown图片语法转换为HTML
+            let formatted = content.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width: 100%; height: auto; border-radius: 8px; margin: 1rem 0;">');
+            
+            // 将HTML img标签添加样式
+            formatted = formatted.replace(/<img([^>]+)>/g, '<img$1 style="max-width: 100%; height: auto; border-radius: 8px; margin: 1rem 0;">');
+            
+            // 将换行符转换为<br>
+            formatted = formatted.replace(/\n/g, '<br>');
+            
+            return formatted;
+        }
+
         // 打开阅读视图
         async function openArticle(id) {
             try {
@@ -1128,7 +1446,7 @@
                         <span>${new Date(article.created_at).toLocaleDateString()}</span>
                     </div>
                     <div class="article-body">
-                        ${article.content.replace(/\n/g, '<br>')}
+                        ${formatContent(article.content)}
                     </div>
                 `;
                 
@@ -1149,6 +1467,7 @@
         }
 
         function closeReadingView() {
+            stopTTS();
             document.getElementById('readingView').classList.remove('active');
             currentReadingArticle = null;
             loadArticles();
@@ -1435,30 +1754,70 @@
         
         // ==================== TTS 语音朗读 ====================
         
-        function readArticleAloud() {
+        function toggleTTS() {
             if (!currentReadingArticle) return;
             
-            // 使用浏览器内置 Speech Synthesis API
             if (!('speechSynthesis' in window)) {
                 alert('您的浏览器不支持语音朗读');
                 return;
             }
             
-            // 停止当前朗读
-            window.speechSynthesis.cancel();
+            // 暂停中 → 继续
+            if (window.speechSynthesis.paused) {
+                window.speechSynthesis.resume();
+                updateTTSButtons('playing');
+                return;
+            }
             
+            // 播放中 → 暂停
+            if (window.speechSynthesis.speaking) {
+                window.speechSynthesis.pause();
+                updateTTSButtons('paused');
+                return;
+            }
+            
+            // 开始新的朗读
             const text = currentReadingArticle.title + '。' + 
                 currentReadingArticle.content
                     .replace(/<[^>]+>/g, '')
                     .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
-                    .substring(0, 5000); // 限制长度
+                    .substring(0, 5000);
             
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.lang = 'zh-CN';
             utterance.rate = 1.0;
             utterance.pitch = 1.0;
             
+            utterance.onend = () => updateTTSButtons('idle');
+            utterance.onerror = () => updateTTSButtons('idle');
+            
             window.speechSynthesis.speak(utterance);
+            updateTTSButtons('playing');
+        }
+        
+        function stopTTS() {
+            window.speechSynthesis.cancel();
+            updateTTSButtons('idle');
+        }
+        
+        function updateTTSButtons(state) {
+            const playBtn = document.getElementById('ttsPlayBtn');
+            const stopBtn = document.getElementById('ttsStopBtn');
+            if (!playBtn || !stopBtn) return;
+            
+            if (state === 'playing') {
+                playBtn.textContent = '⏸️';
+                playBtn.title = '暂停';
+                stopBtn.style.display = '';
+            } else if (state === 'paused') {
+                playBtn.textContent = '▶️';
+                playBtn.title = '继续';
+                stopBtn.style.display = '';
+            } else {
+                playBtn.textContent = '🔊';
+                playBtn.title = '语音朗读';
+                stopBtn.style.display = 'none';
+            }
         }
         
         // ==================== 字体大小控制 ====================
