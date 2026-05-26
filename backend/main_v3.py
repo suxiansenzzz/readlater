@@ -93,6 +93,16 @@ os.makedirs(IMAGES_DIR, exist_ok=True)
 
 app = FastAPI(title="ReadLater", version="1.9.0")
 
+# 添加 CORS 中间件（浏览器扩展需要）
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 允许所有来源（生产环境应限制）
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # ==================== 数据模型 ====================
 
 class ArticleCreate(BaseModel):
@@ -244,19 +254,39 @@ def get_image_extension(url: str, content_type: str = None) -> str:
     
     return '.jpg'
 
-async def download_image(client: httpx.AsyncClient, url: str, article_id: int) -> Optional[str]:
+async def download_image(client: httpx.AsyncClient, url: str, article_id: int, base_url: str = None) -> Optional[str]:
     try:
-        response = await client.get(url, timeout=10, follow_redirects=True)
+        # 设置防盗链头
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        }
+        
+        # 添加Referer头（防盗链关键）
+        if base_url:
+            parsed_base = urlparse(base_url)
+            headers['Referer'] = f"{parsed_base.scheme}://{parsed_base.netloc}"
+        
+        response = await client.get(url, timeout=15, follow_redirects=True, headers=headers)
         if response.status_code == 200:
+            # 检查图片大小（过滤太小的图片）
+            content = response.content
+            if len(content) < 1024:  # 小于1KB的图片可能是追踪像素或图标
+                print(f"图片太小，跳过: {url} ({len(content)} bytes)")
+                return None
+            
             url_hash = get_image_hash(url)
             ext = get_image_extension(url, response.headers.get('content-type'))
             filename = f"{url_hash}{ext}"
             filepath = os.path.join(IMAGES_DIR, filename)
             
             with open(filepath, 'wb') as f:
-                f.write(response.content)
+                f.write(content)
             
             return filename
+        else:
+            print(f"下载图片失败 {url}: HTTP {response.status_code}")
     except Exception as e:
         print(f"下载图片失败 {url}: {e}")
     return None
@@ -286,28 +316,57 @@ def extract_images_from_content(content: str) -> List[str]:
     
     return urls
 
-async def download_article_images(html: str, content: str, base_url: str, article_id: int) -> List[dict]:
+def replace_image_urls_in_content(content: str, url_mapping: dict) -> str:
+    """替换内容中的图片URL为本地路径"""
+    result = content
+    
+    for original_url, local_path in url_mapping.items():
+        # 替换 Markdown 格式: ![](url)
+        markdown_pattern = r'!\[([^\]]*)\]\(' + re.escape(original_url) + r'\)'
+        result = re.sub(markdown_pattern, r'![\1](' + local_path + r')', result)
+        
+        # 替换 HTML 格式: <img src="url">
+        html_pattern = r'(<img[^>]+src=["\'])' + re.escape(original_url) + r'(["\'])'
+        result = re.sub(html_pattern, r'\1' + local_path + r'\2', result)
+    
+    return result
+
+async def download_article_images(html: str, content: str, base_url: str, article_id: int):
+    """下载文章图片，返回 (images, updated_content)"""
     images = []
+    url_mapping = {}  # 原始URL -> 本地路径的映射
     
     img_urls = extract_images_from_html(html, base_url)
     img_urls.extend(extract_images_from_content(content))
     
+    # 去重
     img_urls = list(set(img_urls))
     
     if not img_urls:
-        return images
+        return images, content
+    
+    # 限制最多下载20张图片
+    if len(img_urls) > 20:
+        print(f"图片数量过多，只下载前20张 (总共 {len(img_urls)} 张)")
+        img_urls = img_urls[:20]
     
     async with httpx.AsyncClient() as client:
         for url in img_urls:
-            filename = await download_image(client, url, article_id)
+            filename = await download_image(client, url, article_id, base_url)
             if filename:
+                local_path = f'/images/{filename}'
                 images.append({
                     'original_url': url,
-                    'local_path': f'/images/{filename}',
+                    'local_path': local_path,
                     'filename': filename
                 })
+                url_mapping[url] = local_path
     
-    return images
+    # 替换内容中的图片URL为本地路径
+    updated_content = replace_image_urls_in_content(content, url_mapping)
+    
+    print(f"图片下载完成: 成功 {len(images)}/{len(img_urls)}，内容已更新: {updated_content != content}")
+    return images, updated_content
 
 # ==================== 抓取功能 ====================
 
@@ -460,7 +519,7 @@ async def save_article(article: ArticleCreate):
         article_id = cursor.lastrowid
         conn.commit()
         
-        images = await download_article_images(
+        images, updated_content = await download_article_images(
             data["html"], 
             data["content"], 
             data["url"], 
@@ -473,9 +532,17 @@ async def save_article(article: ArticleCreate):
                 VALUES (?, ?, ?, ?, ?)
             """, (article_id, img['original_url'], img['local_path'], img['filename'], now))
         
+        # 如果内容被更新（图片URL替换为本地路径），更新数据库
+        if updated_content != data["content"]:
+            conn.execute(
+                "UPDATE articles SET content = ? WHERE id = ?",
+                (updated_content, article_id)
+            )
+            print(f"文章内容已更新: ID {article_id}")
+        
         # 应用自动标签规则
         matched_tags = apply_rules_to_article(
-            conn, article_id, data["url"], data["title"], data["content"]
+            conn, article_id, data["url"], data["title"], updated_content
         )
         
         conn.commit()

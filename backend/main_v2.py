@@ -130,22 +130,24 @@ def init_db():
     """)
     
     # 迁移旧数据库（添加新列）- 必须在创建索引之前
-    try:
-        conn.execute("ALTER TABLE articles ADD COLUMN is_archived INTEGER DEFAULT 0")
-    except:
-        pass
-    try:
-        conn.execute("ALTER TABLE articles ADD COLUMN reading_progress REAL DEFAULT 0")
-    except:
-        pass
-    try:
-        conn.execute("ALTER TABLE articles ADD COLUMN updated_at TEXT")
-    except:
-        pass
-    try:
-        conn.execute("ALTER TABLE articles ADD COLUMN domain TEXT")
-    except:
-        pass
+    migrations = [
+        ("is_archived", "INTEGER DEFAULT 0"),
+        ("reading_progress", "REAL DEFAULT 0"),
+        ("updated_at", "TEXT"),
+        ("domain", "TEXT"),
+    ]
+    
+    for col_name, col_type in migrations:
+        try:
+            conn.execute(f"ALTER TABLE articles ADD COLUMN {col_name} {col_type}")
+            conn.commit()
+        except sqlite3.OperationalError as e:
+            # 列已存在或其他错误
+            if "duplicate column name" not in str(e).lower():
+                pass  # 忽略列已存在的错误
+    
+    # 确保迁移完成后再创建索引
+    conn.commit()
     
     # 索引（在迁移之后创建）
     conn.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON articles(created_at)")
@@ -184,17 +186,76 @@ def get_image_extension(url: str, content_type: str = None) -> str:
     
     return '.jpg'
 
-async def download_image(client: httpx.AsyncClient, url: str, article_id: int) -> Optional[str]:
+def is_article_image(url: str, base_url: str) -> bool:
+    """判断是否是文章内容图片（而不是装饰性图片）"""
+    parsed = urlparse(url)
+    path = parsed.path.lower()
+    
+    # 过滤掉明显的装饰性图片
+    skip_patterns = [
+        '/avatar/', '/head/', '/user/', '/profile/',  # 头像
+        '/logo/', '/icon/', '/brand/',                 # Logo/图标
+        '/qr', '/qrcode',                             # 二维码
+        '/banner/', '/ad/', '/ads/',                   # 广告/横幅
+        '/favicon',                                   # 网站图标
+        '/emoji/', '/emoticon/',                       # 表情
+        '/badge/', '/medal/',                          # 徽章
+        '/button/', '/btn/',                           # 按钮
+        '/loading/', '/spinner/',                      # 加载动画
+        '/placeholder/',                               # 占位图
+        '/thumb/', '/thumbnail/',                      # 缩略图（通常是小图）
+    ]
+    
+    for pattern in skip_patterns:
+        if pattern in path:
+            return False
+    
+    # 过滤掉太小的图片（通过URL判断）
+    if any(size in path for size in ['_16.', '_24.', '_32.', '_48.', '_64.', '_80.', '_96.']):
+        return False
+    
+    # 过滤掉明显的追踪像素
+    if '1x1' in path or 'pixel' in path:
+        return False
+    
+    return True
+
+def get_content_hash(content: bytes) -> str:
+    """获取图片内容哈希"""
+    return hashlib.md5(content).hexdigest()
+
+async def download_image(client: httpx.AsyncClient, url: str, article_id: int, base_url: str = None) -> Optional[str]:
+    """下载单张图片，支持防盗链"""
     try:
-        response = await client.get(url, timeout=10, follow_redirects=True)
+        # 设置防盗链头
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+            'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+        }
+        
+        # 添加Referer头（防盗链关键）
+        if base_url:
+            parsed_base = urlparse(base_url)
+            headers['Referer'] = f"{parsed_base.scheme}://{parsed_base.netloc}"
+        
+        response = await client.get(url, timeout=10, follow_redirects=True, headers=headers)
         if response.status_code == 200:
+            # 检查图片大小（过滤太小的图片）
+            content = response.content
+            if len(content) < 1024:  # 小于1KB的图片可能是追踪像素或图标
+                print(f"图片太小，跳过: {url} ({len(content)} bytes)")
+                return None
+            
             url_hash = get_image_hash(url)
             ext = get_image_extension(url, response.headers.get('content-type'))
             filename = f"{url_hash}{ext}"
             filepath = os.path.join(IMAGES_DIR, filename)
             
             with open(filepath, 'wb') as f:
-                f.write(response.content)
+                f.write(content)
             
             return filename
     except Exception as e:
@@ -243,32 +304,70 @@ def replace_image_urls_in_content(content: str, url_mapping: dict) -> str:
     return result
 
 async def download_article_images(html: str, content: str, base_url: str, article_id: int) -> List[dict]:
+    """下载文章图片，支持智能过滤和去重"""
     images = []
     url_mapping = {}  # 原始URL -> 本地路径的映射
     
+    # 提取所有图片URL
     img_urls = extract_images_from_html(html, base_url)
     img_urls.extend(extract_images_from_content(content))
     
+    # 去重
     img_urls = list(set(img_urls))
     
-    if not img_urls:
+    # 智能过滤：只保留文章内容图片
+    filtered_urls = []
+    for url in img_urls:
+        if is_article_image(url, base_url):
+            filtered_urls.append(url)
+        else:
+            print(f"过滤装饰性图片: {url[:80]}...")
+    
+    print(f"图片过滤: {len(img_urls)} -> {len(filtered_urls)} (过滤了 {len(img_urls)-len(filtered_urls)} 张)")
+    
+    if not filtered_urls:
         return images, content
     
+    # 限制最多下载20张图片
+    if len(filtered_urls) > 20:
+        print(f"图片数量过多，只下载前20张 (总共 {len(filtered_urls)} 张)")
+        filtered_urls = filtered_urls[:20]
+    
+    # 下载图片
+    downloaded_hashes = set()  # 用于内容去重
     async with httpx.AsyncClient() as client:
-        for url in img_urls:
-            filename = await download_image(client, url, article_id)
+        for url in filtered_urls:
+            filename = await download_image(client, url, article_id, base_url)
             if filename:
-                local_path = f'/images/{filename}'
-                images.append({
-                    'original_url': url,
-                    'local_path': local_path,
-                    'filename': filename
-                })
-                url_mapping[url] = local_path
+                # 检查内容去重（基于文件哈希）
+                filepath = os.path.join(IMAGES_DIR, filename)
+                try:
+                    with open(filepath, 'rb') as f:
+                        content_hash = get_content_hash(f.read())
+                    
+                    if content_hash in downloaded_hashes:
+                        # 重复图片，删除文件
+                        os.remove(filepath)
+                        print(f"重复图片，跳过: {url[:80]}...")
+                        continue
+                    
+                    downloaded_hashes.add(content_hash)
+                    
+                    local_path = f'/images/{filename}'
+                    images.append({
+                        'original_url': url,
+                        'local_path': local_path,
+                        'filename': filename,
+                        'content_hash': content_hash
+                    })
+                    url_mapping[url] = local_path
+                except Exception as e:
+                    print(f"处理图片失败 {url}: {e}")
     
     # 替换内容中的图片URL为本地路径
     updated_content = replace_image_urls_in_content(content, url_mapping)
     
+    print(f"图片下载完成: 成功 {len(images)}/{len(filtered_urls)}")
     return images, updated_content
 
 # ==================== 抓取功能 ====================
