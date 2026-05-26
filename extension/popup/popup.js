@@ -1,4 +1,5 @@
-// ReadLater Popup 脚本 v0.2.0
+// ReadLater Popup 脚本 v0.3.0
+// 支持页面内保存状态反馈
 
 const DEFAULT_SERVER = 'http://192.168.31.5:8000';
 
@@ -59,6 +60,17 @@ async function savePage() {
       await chrome.storage.local.set({ lastTags: tagsStr });
     }
     
+    // 先通知内容脚本显示保存中状态
+    try {
+      await chrome.tabs.sendMessage(tab.id, {
+        type: 'READLATER_STATUS',
+        status: 'saving',
+        title: tab.title
+      });
+    } catch (e) {
+      console.log('内容脚本未注入，跳过页面状态反馈');
+    }
+    
     // 发送保存请求
     const response = await fetch(`${serverUrl}/api/save`, {
       method: 'POST',
@@ -84,7 +96,26 @@ async function savePage() {
       status.textContent = '✅ 保存成功！';
       btn.textContent = '✅ 已保存';
       
-      // 2秒后关闭弹窗
+      // 通知内容脚本显示成功状态
+      try {
+        await chrome.tabs.sendMessage(tab.id, {
+          type: 'READLATER_STATUS',
+          status: 'success',
+          title: tab.title,
+          articleId: data.article_id
+        });
+      } catch (e) {
+        console.log('内容脚本未注入，跳过页面状态反馈');
+      }
+      
+      // 更新图标
+      chrome.action.setBadgeText({ text: '✓' });
+      chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
+      setTimeout(() => {
+        chrome.action.setBadgeText({ text: '' });
+      }, 2000);
+      
+      // 1.5秒后关闭弹窗
       setTimeout(() => {
         window.close();
       }, 1500);
@@ -97,5 +128,24 @@ async function savePage() {
     status.textContent = '❌ ' + error.message;
     btn.disabled = false;
     btn.textContent = '💾 保存到稍后阅读';
+    
+    // 通知内容脚本显示错误状态
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      await chrome.tabs.sendMessage(tab.id, {
+        type: 'READLATER_STATUS',
+        status: 'error',
+        detail: error.message
+      });
+    } catch (e) {
+      console.log('内容脚本未注入，跳过页面状态反馈');
+    }
+    
+    // 更新图标
+    chrome.action.setBadgeText({ text: '✗' });
+    chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
+    setTimeout(() => {
+      chrome.action.setBadgeText({ text: '' });
+    }, 3000);
   }
 }

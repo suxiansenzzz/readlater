@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "ReadLater - 稍后阅读",
-  "version": "0.2.0",
-  "description": "一键保存网页到你的ReadLater服务器，支持标签、存档、导出",
+  "version": "0.3.0",
+  "description": "一键保存网页到你的ReadLater服务器，支持标签、存档、导出，带页面内保存状态反馈",
   "permissions": [
     "activeTab",
     "storage",
@@ -29,6 +29,14 @@
   "background": {
     "service_worker": "background.js"
   },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
   "commands": {
     "save-page": {
       "suggested_key": {
