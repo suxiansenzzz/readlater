@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - ReadLater</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <meta name="theme-color" content="#4F46E5">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --primary-light: #818cf8;
+            --glass-bg: rgba(255, 255, 255, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.5);
+            --glass-shadow: 0 8px 32px rgba(31, 38, 135, 0.15);
+            --glass-blur: blur(12px);
+            --text: #1e293b;
+            --text-light: #64748b;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --radius: 16px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: var(--text);
+            padding: 1rem;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 40% 40%, rgba(120, 198, 255, 0.2) 0%, transparent 50%);
+            z-index: 0;
+            animation: bgShift 15s ease-in-out infinite;
+        }
+        @keyframes bgShift {
+            0%, 100% { transform: scale(1) rotate(0deg); }
+            50% { transform: scale(1.1) rotate(5deg); }
+        }
+
+        .login-card {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 400px;
+            background: var(--glass-bg);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius);
+            box-shadow: var(--glass-shadow);
+            padding: 2.5rem 2rem;
+            animation: fadeIn 0.4s ease;
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+        .login-logo {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .login-logo .icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 0.75rem;
+            background: var(--primary);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            color: white;
+        }
+        .login-logo h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text);
+        }
+        .login-logo p {
+            font-size: 0.9rem;
+            color: var(--text-light);
+            margin-top: 0.25rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+        .form-label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 0.4rem;
+            color: var(--text);
+        }
+        .input-wrap {
+            position: relative;
+        }
+        .form-input {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            padding-right: 2.8rem;
+            border: 2px solid transparent;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.5);
+            font-size: 1rem;
+            color: var(--text);
+            transition: border-color 0.2s, box-shadow 0.2s;
+            outline: none;
+        }
+        .form-input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+        }
+        .form-input.error {
+            border-color: var(--danger);
+            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+        }
+        .toggle-pw {
+            position: absolute;
+            right: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 1.2rem;
+            opacity: 0.5;
+            transition: opacity 0.2s;
+        }
+        .toggle-pw:hover { opacity: 1; }
+
+        .btn {
+            width: 100%;
+            padding: 0.75rem;
+            border: none;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+        .btn-primary:hover {
+            background: var(--primary-dark);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+        }
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-light);
+            margin-top: 0.75rem;
+            font-size: 0.9rem;
+        }
+        .btn-ghost:hover {
+            color: var(--primary);
+            background: rgba(99, 102, 241, 0.05);
+        }
+
+        .error-msg {
+            color: var(--danger);
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+            display: none;
+            animation: shake 0.3s ease;
+        }
+        .error-msg.show { display: block; }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+
+        .success-msg {
+            color: var(--success);
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+            display: none;
+        }
+        .success-msg.show { display: block; }
+
+        .spinner {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            vertical-align: middle;
+            margin-right: 0.5rem;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .divider {
+            text-align: center;
+            color: var(--text-light);
+            font-size: 0.8rem;
+            margin: 1.25rem 0;
+            position: relative;
+        }
+        .divider::before, .divider::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            width: 35%;
+            height: 1px;
+            background: rgba(0,0,0,0.1);
+        }
+        .divider::before { left: 0; }
+        .divider::after { right: 0; }
+
+        .footer {
+            text-align: center;
+            margin-top: 1.5rem;
+            font-size: 0.8rem;
+            color: var(--text-light);
+        }
+
+        @media (max-width: 480px) {
+            body { align-items: flex-start; padding-top: 2rem; min-height: 100dvh; }
+            .login-card { padding: 1.5rem 1.25rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="login-logo">
+            <div class="icon">📖</div>
+            <h1>ReadLater</h1>
+            <p>稍后阅读，安全私密</p>
+        </div>
+
+        <!-- 登录表单 -->
+        <form id="loginForm">
+            <div class="form-group">
+                <label class="form-label">密码</label>
+                <div class="input-wrap">
+                    <input type="password" class="form-input" id="password" placeholder="输入密码" autocomplete="current-password" required>
+                    <button type="button" class="toggle-pw" id="togglePw" title="显示密码">👁</button>
+                </div>
+            </div>
+            <div class="error-msg" id="errorMsg"></div>
+            <div class="success-msg" id="successMsg"></div>
+            <button type="submit" class="btn btn-primary" id="loginBtn">登录</button>
+        </form>
+
+        <!-- 首次设置表单（默认隐藏） -->
+        <form id="setupForm" style="display:none;">
+            <div class="form-group">
+                <label class="form-label">设置管理员密码</label>
+                <div class="input-wrap">
+                    <input type="password" class="form-input" id="setupPassword" placeholder="至少6个字符" autocomplete="new-password" required>
+                    <button type="button" class="toggle-pw" id="toggleSetupPw" title="显示密码">👁</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">确认密码</label>
+                <div class="input-wrap">
+                    <input type="password" class="form-input" id="setupConfirm" placeholder="再输一遍" autocomplete="new-password" required>
+                </div>
+            </div>
+            <div class="error-msg" id="setupError"></div>
+            <div class="success-msg" id="setupSuccess"></div>
+            <button type="submit" class="btn btn-primary" id="setupBtn">创建管理员</button>
+        </form>
+
+        <div class="divider">或</div>
+
+        <button class="btn btn-ghost" id="guestBtn">以游客身份浏览</button>
+
+        <div class="footer">
+            🔒 你的数据，仅你可见
+        </div>
+    </div>
+
+    <script>
+        // ===== 页面初始化 =====
+        async function init() {
+            try {
+                const res = await fetch('/api/auth/status');
+                const data = await res.json();
+
+                if (data.authenticated) {
+                    // 已登录 → 跳转主页
+                    window.location.href = '/';
+                    return;
+                }
+                if (data.need_setup) {
+                    // 首次使用 → 显示设置表单
+                    document.getElementById('loginForm').style.display = 'none';
+                    document.getElementById('setupForm').style.display = 'block';
+                    document.querySelector('.login-logo p').textContent = '首次使用，请设置管理员密码';
+                }
+                if (!data.guest_enabled) {
+                    document.getElementById('guestBtn').style.display = 'none';
+                    document.querySelector('.divider').style.display = 'none';
+                }
+            } catch (e) {
+                showError('无法连接服务器');
+            }
+        }
+        init();
+
+        // ===== 登录 =====
+        const loginForm = document.getElementById('loginForm');
+        const loginBtn = document.getElementById('loginBtn');
+        const errorMsg = document.getElementById('errorMsg');
+
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const password = document.getElementById('password').value;
+            if (!password) return;
+
+            loginBtn.disabled = true;
+            loginBtn.innerHTML = '<span class="spinner"></span>登录中...';
+            hideError();
+
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password }),
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    window.location.href = '/';
+                } else if (data.need_setup) {
+                    document.getElementById('loginForm').style.display = 'none';
+                    document.getElementById('setupForm').style.display = 'block';
+                    document.querySelector('.login-logo p').textContent = '首次使用，请设置管理员密码';
+                } else {
+                    showError(data.error || '登录失败');
+                }
+            } catch (e) {
+                showError('网络错误，请重试');
+            } finally {
+                loginBtn.disabled = false;
+                loginBtn.textContent = '登录';
+            }
+        });
+
+        // ===== 首次设置 =====
+        const setupForm = document.getElementById('setupForm');
+        const setupBtn = document.getElementById('setupBtn');
+
+        setupForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const password = document.getElementById('setupPassword').value;
+            const confirm = document.getElementById('setupConfirm').value;
+            const setupError = document.getElementById('setupError');
+
+            if (password.length < 6) {
+                showSetupError('密码至少6个字符');
+                return;
+            }
+            if (password !== confirm) {
+                showSetupError('两次密码不一致');
+                return;
+            }
+
+            setupBtn.disabled = true;
+            setupBtn.innerHTML = '<span class="spinner"></span>创建中...';
+            hideSetupError();
+
+            try {
+                const res = await fetch('/api/auth/setup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password }),
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    document.getElementById('setupSuccess').textContent = '✅ 创建成功，正在跳转...';
+                    document.getElementById('setupSuccess').classList.add('show');
+                    setTimeout(() => window.location.href = '/', 1000);
+                } else {
+                    showSetupError(data.error || '创建失败');
+                }
+            } catch (e) {
+                showSetupError('网络错误，请重试');
+            } finally {
+                setupBtn.disabled = false;
+                setupBtn.textContent = '创建管理员';
+            }
+        });
+
+        // ===== 游客入口 =====
+        document.getElementById('guestBtn').addEventListener('click', () => {
+            window.location.href = '/';
+        });
+
+        // ===== 密码可见性切换 =====
+        function setupToggle(btnId, inputId) {
+            const btn = document.getElementById(btnId);
+            const input = document.getElementById(inputId);
+            btn.addEventListener('click', () => {
+                const isPassword = input.type === 'password';
+                input.type = isPassword ? 'text' : 'password';
+                btn.textContent = isPassword ? '🙈' : '👁';
+            });
+        }
+        setupToggle('togglePw', 'password');
+        setupToggle('toggleSetupPw', 'setupPassword');
+
+        // ===== 错误提示 =====
+        function showError(msg) {
+            errorMsg.textContent = msg;
+            errorMsg.classList.add('show');
+            document.getElementById('password').classList.add('error');
+        }
+        function hideError() {
+            errorMsg.classList.remove('show');
+            document.getElementById('password').classList.remove('error');
+        }
+        function showSetupError(msg) {
+            const el = document.getElementById('setupError');
+            el.textContent = msg;
+            el.classList.add('show');
+        }
+        function hideSetupError() {
+            document.getElementById('setupError').classList.remove('show');
+        }
+
+        // ===== 主题色同步（从 localStorage 读取） =====
+        try {
+            const s = JSON.parse(localStorage.getItem('faviconSettings') || '{}');
+            if (s.color && /^#[0-9a-fA-F]{6}$/.test(s.color) && s.color !== '#4F46E5') {
+                document.documentElement.style.setProperty('--primary', s.color);
+                const r = parseInt(s.color.slice(1,3), 16);
+                const g = parseInt(s.color.slice(3,5), 16);
+                const b = parseInt(s.color.slice(5,7), 16);
+                document.body.style.background = `linear-gradient(135deg, 
+                    rgb(${Math.min(r+30,255)}, ${Math.min(g+30,255)}, ${Math.min(b+50,255)}) 0%, 
+                    rgb(${Math.max(r-30,0)}, ${Math.max(g-50,0)}, ${Math.max(b,0)}) 100%)`;
+            }
+        } catch {}
+    </script>
+</body>
+</html>

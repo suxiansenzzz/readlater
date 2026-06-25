@@ -1,225 +1,35 @@
-/* ReadLater 保存状态反馈样式 */
+/* ReadLater 浏览器扩展 - Content CSS */
 
-/* Toast 容器 */
-.readlater-toast-container {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  z-index: 2147483647;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  pointer-events: none;
-}
-
-/* Toast 消息 */
 .readlater-toast {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 20px;
-  border-radius: 12px;
-  background: white;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  font-size: 14px;
-  line-height: 1.4;
-  max-width: 380px;
-  min-width: 280px;
-  pointer-events: auto;
-  transform: translateX(120%);
-  opacity: 0;
-  transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-  border-left: 4px solid #e2e8f0;
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 12px 20px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 8px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    z-index: 999999;
+    animation: readlater-slideIn 0.3s ease;
 }
 
-.readlater-toast.show {
-  transform: translateX(0);
-  opacity: 1;
-}
-
-.readlater-toast.hide {
-  transform: translateX(120%);
-  opacity: 0;
-}
-
-/* Toast 状态样式 */
-.readlater-toast.saving {
-  border-left-color: #4f46e5;
+@keyframes readlater-slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
 }
 
 .readlater-toast.success {
-  border-left-color: #10b981;
-  background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);
+    background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
 }
 
 .readlater-toast.error {
-  border-left-color: #ef4444;
-  background: linear-gradient(135deg, #fef2f2 0%, #ffffff 100%);
-}
-
-.readlater-toast.warning {
-  border-left-color: #f59e0b;
-  background: linear-gradient(135deg, #fffbeb 0%, #ffffff 100%);
-}
-
-.readlater-toast.info {
-  border-left-color: #3b82f6;
-  background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%);
-}
-
-/* Toast 图标 */
-.readlater-toast-icon {
-  font-size: 22px;
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.readlater-toast.saving .readlater-toast-icon {
-  animation: readlater-spin 1s linear infinite;
-}
-
-/* Toast 内容 */
-.readlater-toast-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.readlater-toast-title {
-  font-weight: 600;
-  color: #1e293b;
-  margin-bottom: 2px;
-}
-
-.readlater-toast-message {
-  color: #64748b;
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* 进度条 */
-.readlater-toast-progress {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  height: 3px;
-  background: linear-gradient(90deg, #4f46e5, #7c3aed);
-  border-radius: 0 0 12px 12px;
-  transition: width 0.3s linear;
-}
-
-.readlater-toast.success .readlater-toast-progress {
-  background: linear-gradient(90deg, #10b981, #34d399);
-}
-
-.readlater-toast.error .readlater-toast-progress {
-  background: linear-gradient(90deg, #ef4444, #f87171);
-}
-
-/* 关闭按钮 */
-.readlater-toast-close {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 20px;
-  height: 20px;
-  border: none;
-  background: transparent;
-  color: #94a3b8;
-  font-size: 14px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  transition: all 0.2s;
-  opacity: 0;
-}
-
-.readlater-toast:hover .readlater-toast-close {
-  opacity: 1;
-}
-
-.readlater-toast-close:hover {
-  background: #f1f5f9;
-  color: #64748b;
-}
-
-/* 深色模式 */
-@media (prefers-color-scheme: dark) {
-  .readlater-toast {
-    background: #1e293b;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
-  }
-
-  .readlater-toast.success {
-    background: linear-gradient(135deg, #064e3b 0%, #1e293b 100%);
-  }
-
-  .readlater-toast.error {
-    background: linear-gradient(135deg, #7f1d1d 0%, #1e293b 100%);
-  }
-
-  .readlater-toast.warning {
-    background: linear-gradient(135deg, #78350f 0%, #1e293b 100%);
-  }
-
-  .readlater-toast.info {
-    background: linear-gradient(135deg, #1e3a5f 0%, #1e293b 100%);
-  }
-
-  .readlater-toast-title {
-    color: #f1f5f9;
-  }
-
-  .readlater-toast-message {
-    color: #94a3b8;
-  }
-
-  .readlater-toast-close {
-    color: #64748b;
-  }
-
-  .readlater-toast-close:hover {
-    background: #334155;
-    color: #94a3b8;
-  }
-}
-
-/* 旋转动画 */
-@keyframes readlater-spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-/* 弹出动画 */
-@keyframes readlater-bounce-in {
-  0% { transform: scale(0.8); opacity: 0; }
-  50% { transform: scale(1.05); }
-  100% { transform: scale(1); opacity: 1; }
-}
-
-.readlater-toast.success .readlater-toast-icon {
-  animation: readlater-bounce-in 0.5s ease;
-}
-
-/* 响应式 */
-@media (max-width: 480px) {
-  .readlater-toast-container {
-    top: 10px;
-    right: 10px;
-    left: 10px;
-  }
-
-  .readlater-toast {
-    max-width: 100%;
-    min-width: 0;
-    width: 100%;
-  }
+    background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
 }

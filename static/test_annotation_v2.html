@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>批注功能测试 - 改进版</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding: 2rem;
+            line-height: 1.6;
+        }
+        .article-body {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+        }
+        .highlight-text {
+            background-color: #ffeb3b;
+            padding: 2px 4px;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .highlight-text:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            transform: translateY(-1px);
+        }
+        .highlight-text[data-color="green"] { background-color: #4caf50; color: white; }
+        .highlight-text[data-color="pink"] { background-color: #e91e63; color: white; }
+        .highlight-text[data-color="blue"] { background-color: #2196f3; color: white; }
+        .highlight-text[data-color="yellow"] { background-color: #ffeb3b; }
+        
+        .annotation-popup {
+            position: fixed;
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 1000;
+            display: none;
+            width: 300px;
+        }
+        .annotation-popup.active {
+            display: block;
+        }
+        .annotation-popup textarea {
+            width: 100%;
+            height: 80px;
+            margin: 0.5rem 0;
+            padding: 0.5rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            resize: vertical;
+        }
+        .annotation-popup .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 0.5rem;
+        }
+        .annotation-popup .btn-primary {
+            background: #4f46e5;
+            color: white;
+        }
+        .annotation-popup .btn-ghost {
+            background: transparent;
+            border: 1px solid #e2e8f0;
+        }
+        
+        .test-controls {
+            margin: 2rem 0;
+            padding: 1rem;
+            background: #f8fafc;
+            border-radius: 8px;
+        }
+        .test-controls button {
+            margin-right: 0.5rem;
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: #4f46e5;
+            color: white;
+        }
+        .test-controls button:hover {
+            background: #4338ca;
+        }
+    </style>
+</head>
+<body>
+    <h1>批注功能测试 - 改进版</h1>
+    
+    <div class="test-controls">
+        <h3>测试控制</h3>
+        <button onclick="testBasicHighlight()">测试基本高亮</button>
+        <button onclick="testHtmlHighlight()">测试HTML标签高亮</button>
+        <button onclick="testMultipleHighlights()">测试多个高亮</button>
+        <button onclick="clearHighlights()">清除所有高亮</button>
+        <button onclick="showTestAnnotationPopup()">显示批注弹窗</button>
+    </div>
+    
+    <div class="article-body" id="articleBody">
+        <h2>测试文章</h2>
+        <p>这是一段测试文本。忆的老式咖啡餐吧，在时代的洪流中走出了截然不同的命运轨迹。而那群在老式咖啡餐吧陪伴下长大的孩子们，总会在不同时期重新选择它们，哪怕只是为了圆自己一个童年梦想。</p>
+        
+        <p>这是另一段文本，用于测试批注高亮功能。<strong>这段文字被加粗了，</strong>但是批注功能应该能够正确处理HTML标签。</p>
+        
+        <p>第三段文本包含一些特殊字符：!@#$%^&*()_+-=[]{}|;':",./<>? 这些字符不应该影响批注功能。</p>
+        
+        <p class="image-wrapper"><img src="https://via.placeholder.com/300x200" alt="测试图片"/></p>
+        <p class="img-desc">这是一张测试图片的描述。</p>
+        
+        <p>最后一段文本，用于测试批注功能是否能够正确处理长文本和复杂HTML结构。</p>
+    </div>
+    
+    <!-- 批注弹窗 -->
+    <div class="annotation-popup" id="annotationPopup">
+        <h4>添加批注</h4>
+        <div id="selectedTextPreview" style="font-style:italic;color:#64748b;margin-bottom:0.5rem;font-size:0.9rem;"></div>
+        <textarea id="annotationNote" placeholder="写下你的想法..."></textarea>
+        <div style="display:flex;gap:0.5rem;justify-content:flex-end;">
+            <button class="btn btn-ghost" onclick="hideAnnotationPopup()">取消</button>
+            <button class="btn btn-primary" onclick="saveTestAnnotation()">保存</button>
+        </div>
+    </div>
+    
+    <script>
+        let selectedTextData = null;
+        let currentAnnotationColor = '#ffeb3b';
+        
+        // 模拟批注数据
+        const testAnnotations = [
+            {
+                id: 1,
+                highlight_text: "忆的老式咖啡餐吧，在时代的洪流中走出了截然不同的命运轨迹。而那群在老式咖啡餐吧陪伴下长大的孩子们，总会在不同时期重新选择它们，哪怕只是为了圆自己一个童年梦想。",
+                color: "#ffeb3b",
+                note: "这段文字很有意境"
+            },
+            {
+                id: 2,
+                highlight_text: "这段文字被加粗了，",
+                color: "#4caf50",
+                note: "加粗文字测试"
+            },
+            {
+                id: 3,
+                highlight_text: "最后一段文本",
+                color: "#e91e63",
+                note: "最后一段测试"
+            }
+        ];
+        
+        // 应用批注高亮（改进版）
+        function applyAnnotationsHighlight(annotations) {
+            const articleBody = document.getElementById('articleBody');
+            
+            // 按长度排序，优先处理长文本（避免短文本误匹配）
+            annotations.sort((a, b) => b.highlight_text.length - a.highlight_text.length);
+            
+            // 为每个批注添加高亮
+            annotations.forEach(ann => {
+                const highlightText = ann.highlight_text;
+                const colorMap = {
+                    '#ffeb3b': 'yellow',
+                    '#4caf50': 'green',
+                    '#e91e63': 'pink',
+                    '#2196f3': 'blue'
+                };
+                const colorClass = colorMap[ann.color] || 'yellow';
+                
+                // 使用TreeWalker遍历文本节点
+                const walker = document.createTreeWalker(
+                    articleBody,
+                    NodeFilter.SHOW_TEXT,
+                    null,
+                    false
+                );
+                
+                let node;
+                const nodesToReplace = [];
+                
+                // 查找包含高亮文本的文本节点
+                while (node = walker.nextNode()) {
+                    const text = node.textContent;
+                    if (text.includes(highlightText)) {
+                        nodesToReplace.push({
+                            node: node,
+                            text: text,
+                            highlightText: highlightText
+                        });
+                    }
+                }
+                
+                // 替换找到的文本节点
+                nodesToReplace.forEach(item => {
+                    const { node, text, highlightText } = item;
+                    const index = text.indexOf(highlightText);
+                    
+                    if (index !== -1) {
+                        // 创建新的节点
+                        const beforeText = text.substring(0, index);
+                        const afterText = text.substring(index + highlightText.length);
+                        
+                        // 创建高亮span
+                        const highlightSpan = document.createElement('span');
+                        highlightSpan.className = 'highlight-text';
+                        highlightSpan.setAttribute('data-color', colorClass);
+                        highlightSpan.setAttribute('data-annotation-id', ann.id);
+                        highlightSpan.setAttribute('onclick', `showAnnotationDetail(${ann.id})`);
+                        highlightSpan.setAttribute('title', ann.note || '点击查看批注');
+                        highlightSpan.textContent = highlightText;
+                        
+                        // 创建文档片段
+                        const fragment = document.createDocumentFragment();
+                        
+                        if (beforeText) {
+                            fragment.appendChild(document.createTextNode(beforeText));
+                        }
+                        fragment.appendChild(highlightSpan);
+                        if (afterText) {
+                            fragment.appendChild(document.createTextNode(afterText));
+                        }
+                        
+                        // 替换原节点
+                        node.parentNode.replaceChild(fragment, node);
+                    }
+                });
+            });
+        }
+        
+        // 测试基本高亮
+        function testBasicHighlight() {
+            clearHighlights();
+            const basicAnnotations = [testAnnotations[0]];
+            applyAnnotationsHighlight(basicAnnotations);
+            console.log('基本高亮测试完成');
+        }
+        
+        // 测试HTML标签高亮
+        function testHtmlHighlight() {
+            clearHighlights();
+            const htmlAnnotations = [testAnnotations[1]];
+            applyAnnotationsHighlight(htmlAnnotations);
+            console.log('HTML标签高亮测试完成');
+        }
+        
+        // 测试多个高亮
+        function testMultipleHighlights() {
+            clearHighlights();
+            applyAnnotationsHighlight(testAnnotations);
+            console.log('多个高亮测试完成');
+        }
+        
+        // 清除所有高亮
+        function clearHighlights() {
+            const articleBody = document.getElementById('articleBody');
+            const highlights = articleBody.querySelectorAll('.highlight-text');
+            highlights.forEach(highlight => {
+                const parent = highlight.parentNode;
+                const textNode = document.createTextNode(highlight.textContent);
+                parent.replaceChild(textNode, highlight);
+                parent.normalize(); // 合并相邻的文本节点
+            });
+            console.log('已清除所有高亮');
+        }
+        
+        // 显示批注详情
+        function showAnnotationDetail(annotationId) {
+            const annotation = testAnnotations.find(ann => ann.id === annotationId);
+            if (annotation) {
+                alert(`批注详情:\n\n高亮文本: ${annotation.highlight_text}\n\n批注内容: ${annotation.note}\n\n颜色: ${annotation.color}`);
+            }
+        }
+        
+        // 监听文本选择变化
+        document.addEventListener('selectionchange', () => {
+            const selection = window.getSelection();
+            const text = selection.toString().trim();
+            
+            if (text.length < 2) {
+                hideAnnotationPopup();
+                return;
+            }
+            
+            // 检查选择是否在文章内容区域内
+            const articleBody = document.getElementById('articleBody');
+            const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+            if (!range) return;
+            
+            const isInArticleBody = articleBody.contains(range.commonAncestorContainer) || 
+                                   articleBody.contains(range.startContainer) ||
+                                   articleBody.contains(range.endContainer);
+            if (!isInArticleBody) return;
+            
+            // 保存选中的文本
+            selectedTextData = {
+                text: text,
+                start: range.startOffset,
+                end: range.endOffset
+            };
+        });
+        
+        // 显示测试批注弹窗
+        function showTestAnnotationPopup() {
+            if (!selectedTextData || selectedTextData.text.length < 2) {
+                alert('请先选择一些文本');
+                return;
+            }
+            
+            const popup = document.getElementById('annotationPopup');
+            const selection = window.getSelection();
+            const rect = selection.getRangeAt(0).getBoundingClientRect();
+            
+            // 定位弹窗
+            popup.style.top = (rect.bottom + 10) + 'px';
+            popup.style.left = Math.max(10, rect.left) + 'px';
+            popup.classList.add('active');
+            
+            // 显示选中的文本
+            document.getElementById('selectedTextPreview').textContent = 
+                selectedTextData.text.length > 60 ? selectedTextData.text.substring(0, 60) + '...' : selectedTextData.text;
+            document.getElementById('annotationNote').value = '';
+            document.getElementById('annotationNote').focus();
+        }
+        
+        // 隐藏批注弹窗
+        function hideAnnotationPopup() {
+            document.getElementById('annotationPopup').classList.remove('active');
+        }
+        
+        // 保存测试批注
+        function saveTestAnnotation() {
+            if (!selectedTextData) {
+                alert('没有选中的文本');
+                return;
+            }
+            
+            const note = document.getElementById('annotationNote').value.trim();
+            
+            // 创建新的批注
+            const newAnnotation = {
+                id: testAnnotations.length + 1,
+                highlight_text: selectedTextData.text,
+                color: currentAnnotationColor,
+                note: note || '测试批注'
+            };
+            
+            // 添加到测试批注列表
+            testAnnotations.push(newAnnotation);
+            
+            // 应用高亮
+            applyAnnotationsHighlight([newAnnotation]);
+            
+            // 隐藏弹窗
+            hideAnnotationPopup();
+            
+            // 清除选择
+            window.getSelection().removeAllRanges();
+            selectedTextData = null;
+            
+            alert('批注已保存！');
+        }
+        
+        // 页面加载完成后应用测试批注
+        window.onload = () => {
+            applyAnnotationsHighlight(testAnnotations);
+        };
+    </script>
+</body>
+</html>

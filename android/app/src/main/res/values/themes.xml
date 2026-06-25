@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ReadLater" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#6366f1</item>
+        <item name="colorPrimaryVariant">#4f46e5</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+        <item name="colorSecondary">#8b5cf6</item>
+        <item name="colorSecondaryVariant">#7c3aed</item>
+        <item name="colorOnSecondary">@android:color/white</item>
+        <item name="android:statusBarColor">#6366f1</item>
+        <item name="android:navigationBarColor">#6366f1</item>
+        <!-- Prevent white flash between loads -->
+        <item name="android:windowBackground">@color/splash_background</item>
+        <item name="android:colorBackground">@color/splash_background</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+    
+    <!-- 闪屏页主题 -->
+    <style name="Theme.ReadLater.Splash" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">@drawable/splash_background</item>
+        <item name="android:statusBarColor">#6366f1</item>
+        <item name="android:navigationBarColor">#6366f1</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+</resources>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- 背景圆角方形 -->
+  <rect x="4" y="4" width="56" height="56" rx="12" fill="#4F46E5"/>
+  
+  <!-- 书签主体 -->
+  <path d="M20 12h24v40l-12-8-12 8V12z" fill="white" opacity="0.95"/>
+  
+  <!-- 书签装饰线 -->
+  <rect x="26" y="20" width="12" height="3" rx="1.5" fill="#4F46E5" opacity="0.3"/>
+  <rect x="26" y="27" width="12" height="3" rx="1.5" fill="#4F46E5" opacity="0.3"/>
+  
+  <!-- 时钟指针（表示稍后） -->
+  <circle cx="32" cy="36" r="8" fill="#4F46E5" opacity="0.2"/>
+  <path d="M32 32v5l3 2" stroke="#4F46E5" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+</svg>

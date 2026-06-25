@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>手机端批注功能测试</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #f9f9f9;
+        }
+        .highlight-text {
+            background-color: yellow;
+            padding: 2px 4px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .highlight-text[data-color="green"] {
+            background-color: #4caf50;
+            color: white;
+        }
+        .highlight-text[data-color="pink"] {
+            background-color: #e91e63;
+            color: white;
+        }
+        .highlight-text[data-color="blue"] {
+            background-color: #2196f3;
+            color: white;
+        }
+        .btn {
+            display: inline-block;
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .btn:hover {
+            background: #0056b3;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            .test-section {
+                padding: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>📱 手机端批注功能测试</h1>
+    
+    <div class="test-section">
+        <h2>测试说明</h2>
+        <p>这个页面用于测试手机端批注功能修复是否生效。</p>
+        <p><strong>测试步骤：</strong></p>
+        <ol>
+            <li>在下面的测试文本中选择一段文字（长按并拖动选择）</li>
+            <li>观察是否出现批注按钮（📝）</li>
+            <li>点击批注按钮，检查弹窗是否正常显示</li>
+            <li>查看已有批注是否显示高亮</li>
+        </ol>
+    </div>
+    
+    <div class="test-section">
+        <h2>测试文本</h2>
+        <p>这是一段测试文本，用于验证手机端批注功能。请尝试选择下面的文字：</p>
+        <p>人工智能（Artificial Intelligence，简称AI）是计算机科学的一个分支，它企图了解智能的实质，并生产出一种新的能以人类智能相似的方式做出反应的智能机器。人工智能的研究包括机器人、语言识别、图像识别、自然语言处理和专家系统等。</p>
+        <p>人工智能从诞生以来，理论和技术日益成熟，应用领域也不断扩大。可以设想，未来人工智能带来的科技产品，将会是人类智慧的容器。人工智能可以对人的意识、思维的信息过程进行模拟，但不是人的智能，能像人那样思考，也可能超过人的智能。</p>
+    </div>
+    
+    <div class="test-section">
+        <h2>已有批注测试</h2>
+        <p>下面这段文字应该显示高亮：</p>
+        <p id="annotatedText">人工智能从诞生以来，理论和技术日益成熟，应用领域也不断扩大。可以设想，未来人工智能带来的科技产品，将会是人类智慧的容器。</p>
+        <button class="btn" onclick="applyTestAnnotation()">应用测试批注</button>
+    </div>
+    
+    <div class="test-section">
+        <h2>测试结果</h2>
+        <div id="testResults">
+            <div class="status info">等待测试...</div>
+        </div>
+    </div>
+    
+    <div class="test-section">
+        <h2>设备信息</h2>
+        <p id="deviceInfo">检测中...</p>
+        <button class="btn" onclick="checkDeviceInfo()">检查设备信息</button>
+    </div>
+    
+    <script>
+        // 设备检测
+        function checkDeviceInfo() {
+            const info = document.getElementById('deviceInfo');
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+            
+            let html = `<strong>设备类型：</strong>${isMobile ? '移动设备' : '桌面设备'}<br>`;
+            html += `<strong>触摸支持：</strong>${isTouchDevice ? '支持' : '不支持'}<br>`;
+            html += `<strong>屏幕尺寸：</strong>${window.innerWidth} x ${window.innerHeight}<br>`;
+            html += `<strong>User Agent：</strong>${navigator.userAgent.substring(0, 100)}...`;
+            
+            info.innerHTML = html;
+        }
+        
+        // 应用测试批注
+        function applyTestAnnotation() {
+            const textElement = document.getElementById('annotatedText');
+            const originalText = textElement.textContent;
+            
+            // 创建高亮span
+            const highlightSpan = document.createElement('span');
+            highlightSpan.className = 'highlight-text';
+            highlightSpan.setAttribute('data-color', 'green');
+            highlightSpan.setAttribute('data-annotation-id', 'test-1');
+            highlightSpan.setAttribute('title', '测试批注：这是一个重要的概念');
+            highlightSpan.textContent = '理论和技术日益成熟，应用领域也不断扩大';
+            
+            // 替换文本
+            const newText = originalText.replace(
+                '理论和技术日益成熟，应用领域也不断扩大',
+                highlightSpan.outerHTML
+            );
+            
+            textElement.innerHTML = newText;
+            
+            // 显示测试结果
+            showTestResult('success', '✅ 批注应用成功！高亮文本已显示。');
+        }
+        
+        // 显示测试结果
+        function showTestResult(type, message) {
+            const results = document.getElementById('testResults');
+            const statusClass = type === 'success' ? 'success' : 
+                               type === 'error' ? 'error' : 'info';
+            
+            const newResult = document.createElement('div');
+            newResult.className = `status ${statusClass}`;
+            newResult.textContent = message;
+            
+            results.appendChild(newResult);
+        }
+        
+        // 监听文本选择
+        document.addEventListener('selectionchange', function() {
+            const selection = window.getSelection();
+            const text = selection.toString().trim();
+            
+            if (text.length >= 2) {
+                showTestResult('info', `📝 检测到文本选择：${text.substring(0, 30)}${text.length > 30 ? '...' : ''}`);
+            }
+        });
+        
+        // 监听触摸事件（手机端）
+        let touchStartTime = 0;
+        document.addEventListener('touchstart', function() {
+            touchStartTime = Date.now();
+        }, { passive: true });
+        
+        document.addEventListener('touchend', function() {
+            const touchDuration = Date.now() - touchStartTime;
+            if (touchDuration > 300) {
+                showTestResult('info', '👆 检测到长按触摸操作');
+            }
+        }, { passive: true });
+        
+        // 初始化
+        window.onload = function() {
+            checkDeviceInfo();
+            showTestResult('info', '📱 测试页面已加载，请开始测试');
+        };
+    </script>
+</body>
+</html>

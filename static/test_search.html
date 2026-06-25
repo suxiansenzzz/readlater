@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>搜索功能测试</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding: 2rem;
+        }
+        .search-container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .search-input {
+            width: 100%;
+            padding: 1rem;
+            font-size: 1rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+        .results {
+            margin-top: 1rem;
+        }
+        .article-item {
+            padding: 1rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+        .article-title {
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        .article-excerpt {
+            color: #64748b;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="search-container">
+        <h1>搜索功能测试</h1>
+        <input type="text" class="search-input" id="searchInput" placeholder="搜索文章..." oninput="debounceSearch()">
+        <div class="results" id="results">
+            <!-- 搜索结果将显示在这里 -->
+        </div>
+    </div>
+    
+    <script>
+        let searchTimeout = null;
+        
+        function debounceSearch() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(loadArticles, 300);
+        }
+        
+        async function loadArticles() {
+            const search = document.getElementById('searchInput').value;
+            
+            if (!search) {
+                document.getElementById('results').innerHTML = '<p>请输入搜索关键词</p>';
+                return;
+            }
+            
+            try {
+                const url = `/api/articles?search=${encodeURIComponent(search)}`;
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                const results = document.getElementById('results');
+                
+                if (data.articles.length === 0) {
+                    results.innerHTML = '<p>没有找到相关文章</p>';
+                    return;
+                }
+                
+                let html = '';
+                data.articles.forEach(article => {
+                    html += `
+                        <div class="article-item">
+                            <div class="article-title">${article.title}</div>
+                            <div class="article-excerpt">${article.excerpt.substring(0, 100)}...</div>
+                        </div>
+                    `;
+                });
+                
+                results.innerHTML = html;
+            } catch (error) {
+                console.error('搜索失败:', error);
+                document.getElementById('results').innerHTML = '<p>搜索失败，请重试</p>';
+            }
+        }
+        
+        // 页面加载时显示提示
+        window.onload = () => {
+            document.getElementById('results').innerHTML = '<p>请输入关键词开始搜索</p>';
+        };
+    </script>
+</body>
+</html>

@@ -8,6 +8,8 @@ import json
 import sqlite3
 import re
 import hashlib
+import asyncio
+import time
 from datetime import datetime
 from typing import Optional, List
 from urllib.parse import urljoin, urlparse
@@ -15,7 +17,7 @@ from urllib.parse import urljoin, urlparse
 import trafilatura
 import httpx
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Depends, Response, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -43,6 +45,72 @@ except ImportError:
         export_to_csv, export_to_html, export_to_json
     )
 
+# 导入批注模块
+try:
+    from backend.annotations import (
+        init_annotations_table, create_annotation, get_annotations,
+        get_annotation, update_annotation, delete_annotation,
+        get_all_annotations, get_annotations_stats
+    )
+except ImportError:
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+    from backend.annotations import (
+        init_annotations_table, create_annotation, get_annotations,
+        get_annotation, update_annotation, delete_annotation,
+        get_all_annotations, get_annotations_stats
+    )
+
+# 导入抓取错误管理模块
+try:
+    from backend.fetch_errors import (
+        init_fetch_errors_table, record_fetch_error, get_fetch_errors,
+        get_fetch_error, get_fetch_error_by_url, resolve_fetch_error,
+        delete_fetch_error, clear_resolved_errors, get_fetch_errors_stats
+    )
+except ImportError:
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+    from backend.fetch_errors import (
+        init_fetch_errors_table, record_fetch_error, get_fetch_errors,
+        get_fetch_error, get_fetch_error_by_url, resolve_fetch_error,
+        delete_fetch_error, clear_resolved_errors, get_fetch_errors_stats
+    )
+
+# 导入自动标签规则模块
+try:
+    from backend.rules import (
+        init_rules_table, apply_rules_to_article, create_rule,
+        get_all_rules, get_rule, update_rule, delete_rule, apply_rules_to_all, get_rules_stats
+    )
+except ImportError:
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+    from backend.rules import (
+        init_rules_table, apply_rules_to_article, create_rule,
+        get_all_rules, get_rule, update_rule, delete_rule, apply_rules_to_all, get_rules_stats
+    )
+
+# 导入认证模块
+try:
+    from backend.auth import (
+        init_users_table, create_user, get_user_by_username, update_last_login,
+        update_password, has_any_user, hash_password, verify_password,
+        create_token, decode_token, get_current_user, require_auth, require_admin,
+        set_auth_cookie, clear_auth_cookie, check_login_allowed, record_login_failure,
+        clear_login_attempts, load_config, COOKIE_NAME,
+    )
+except ImportError:
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+    from backend.auth import (
+        init_users_table, create_user, get_user_by_username, update_last_login,
+        update_password, has_any_user, hash_password, verify_password,
+        create_token, decode_token, get_current_user, require_auth, require_admin,
+        set_auth_cookie, clear_auth_cookie, check_login_allowed, record_login_failure,
+        clear_login_attempts, load_config, COOKIE_NAME,
+    )
+
 # 配置
 DB_PATH = os.path.join(os.path.dirname(__file__), "readlater.db")
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
@@ -57,7 +125,7 @@ async def lifespan(app: FastAPI):
     yield
     print("👋 ReadLater 关闭")
 
-app = FastAPI(title="ReadLater", version="2.5.0", lifespan=lifespan)
+app = FastAPI(title="ReadLater", version="2.6.0", lifespan=lifespan)
 
 # 添加CORS中间件，允许浏览器扩展跨域请求
 app.add_middleware(
@@ -67,6 +135,104 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ==================== 认证中间件 ====================
+
+# 不需要认证的路径前缀
+_AUTH_SKIP_PATHS=(
+    "/static/",
+    "/images/",
+    "/login",
+    "/api/auth/login",
+    "/api/auth/logout",
+    "/api/auth/status",
+    "/api/auth/setup",
+    "/extension/",
+    "/favicon",
+    "/api/news/fetch",   # 新闻抓取（手动触发）
+)
+
+# 游客可访问的 GET 路径（白名单）
+_GUEST_ALLOWED_GET = (
+    "/api/articles",      # 列表 + 详情
+    "/api/stats",         # 统计
+    "/api/auth/status",   # 认证状态
+    "/api/news",          # 新闻列表
+    "/api/news/sources",  # 新闻来源
+)
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """认证中间件：检查 JWT，设置 request.state.user"""
+    path = request.url.path
+
+    # 跳过不需要认证的路径
+    if any(path.startswith(p) for p in _AUTH_SKIP_PATHS) or path == "/":
+        response = await call_next(request)
+        return response
+
+    # 解析用户（可能为 None）
+    user = get_current_user(request)
+    config = load_config()
+    request.state.user = user
+    request.state.is_guest = user is None
+
+    # 非 GET 请求必须认证（浏览器扩展的 POST 通过 Bearer token）
+    if request.method != "GET" and not user:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "未认证，请先登录"},
+        )
+
+    # GET 请求：检查游客模式
+    if request.method == "GET" and not user:
+        # 游客模式关闭 → 必须登录
+        if not config.get("guest_enabled", True):
+            return JSONResponse(
+                status_code=401,
+                content={"error": "游客模式已关闭，请先登录"},
+            )
+        # 游客模式开启 → 只允许白名单路径
+        if not any(path.startswith(p) for p in _GUEST_ALLOWED_GET):
+            return JSONResponse(
+                status_code=401,
+                content={"error": "游客无权访问此接口，请登录"},
+            )
+
+    response = await call_next(request)
+    return response
+
+
+# 简单的内存缓存
+class SimpleCache:
+    def __init__(self, ttl=300):  # 默认5分钟过期
+        self.cache = {}
+        self.ttl = ttl
+    
+    def get(self, key):
+        if key in self.cache:
+            value, timestamp = self.cache[key]
+            if time.time() - timestamp < self.ttl:
+                return value
+            else:
+                del self.cache[key]
+        return None
+    
+    def set(self, key, value):
+        self.cache[key] = (value, time.time())
+    
+    def delete(self, key):
+        if key in self.cache:
+            del self.cache[key]
+    
+    def clear(self):
+        self.cache.clear()
+
+# 初始化缓存
+article_cache = SimpleCache(ttl=60)  # 文章缓存1分钟
+stats_cache = SimpleCache(ttl=30)    # 统计缓存30秒
 
 # ==================== 数据模型 ====================
 
@@ -124,12 +290,20 @@ def init_db():
             is_archived INTEGER DEFAULT 0,
             created_at TEXT NOT NULL,
             word_count INTEGER DEFAULT 0,
-            reading_time INTEGER DEFAULT 0
+            reading_time INTEGER DEFAULT 0,
+            lead_image_url TEXT
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON articles(created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_is_read ON articles(is_read)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_is_archived ON articles(is_archived)")
+    
+    # 检查是否需要添加 lead_image_url 字段（兼容旧数据库）
+    cursor = conn.execute("PRAGMA table_info(articles)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'lead_image_url' not in columns:
+        conn.execute("ALTER TABLE articles ADD COLUMN lead_image_url TEXT")
+        print("已添加 lead_image_url 字段")
     
     # 图片表
     conn.execute("""
@@ -145,6 +319,18 @@ def init_db():
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_images_article_id ON images(article_id)")
     
+    # 初始化批注表
+    init_annotations_table(conn)
+    
+    # 初始化抓取错误表
+    init_fetch_errors_table(conn)
+    
+    # 初始化自动标签规则表
+    init_rules_table(conn)
+
+    # 初始化用户表
+    init_users_table(conn)
+
     conn.commit()
     conn.close()
     
@@ -243,17 +429,29 @@ def fetch_article(url: str, custom_title: str = None):
     if ANTICRAWL_AVAILABLE:
         try:
             result = fetch_article_new(url, download_images=False, use_anticrawl=True)
+            
+            # 检查是否有验证码需要处理
+            if result.get('captcha_required'):
+                user_msg = result.get('user_message') or result.get('error') or '需要验证码'
+                raise Exception(f"CAPTCHA_REQUIRED:{user_msg}")
+            
             if result.get('error'):
-                raise Exception(result['error'])
+                user_msg = result.get('user_message') or result.get('error')
+                raise Exception(user_msg)
+            
             if not result.get('content'):
                 raise Exception("无法提取正文内容")
             
             content = result['content']
             title = custom_title or result.get('title') or "无标题"
             
-            # 生成摘要（取前200字）
-            excerpt = content[:200].replace('\n', ' ').strip()
-            if len(content) > 200:
+            # 生成摘要（取前200字，去除HTML标签）
+            import re as _re
+            plain = _re.sub(r'<[^>]+>', '', content)
+            plain = _re.sub(r'&[a-z]+;', ' ', plain)
+            plain = _re.sub(r'\s+', ' ', plain).strip()
+            excerpt = plain[:200]
+            if len(plain) > 200:
                 excerpt += "..."
             
             # 计算字数和阅读时间
@@ -270,7 +468,12 @@ def fetch_article(url: str, custom_title: str = None):
                 "html": result.get('html', '')
             }
         except Exception as e:
+            error_msg = str(e)
             print(f"新反爬模块失败，降级到旧模块: {e}")
+            
+            # 如果是验证码错误，直接抛出
+            if error_msg.startswith("CAPTCHA_REQUIRED:"):
+                raise Exception(error_msg)
     
     # 降级到旧的抓取方法
     try:
@@ -289,9 +492,13 @@ def fetch_article(url: str, custom_title: str = None):
         # 获取标题
         title = custom_title or extracted.get('title') or "无标题"
         
-        # 生成摘要（取前200字）
-        excerpt = content[:200].replace('\n', ' ').strip()
-        if len(content) > 200:
+        # 生成摘要（取前200字，去除HTML标签）
+        import re as _re2
+        plain2 = _re2.sub(r'<[^>]+>', '', content)
+        plain2 = _re2.sub(r'&[a-z]+;', ' ', plain2)
+        plain2 = _re2.sub(r'\s+', ' ', plain2).strip()
+        excerpt = plain2[:200]
+        if len(plain2) > 200:
             excerpt += "..."
         
         # 计算字数和阅读时间
@@ -405,6 +612,7 @@ async def download_image(client: httpx.AsyncClient, url: str, article_id: int, b
     """下载单张图片，支持防盗链、重试"""
     import random
     import asyncio
+    import time
     
     for attempt in range(max_retries + 1):
         try:
@@ -494,7 +702,7 @@ def extract_images_from_content(content: str) -> List[str]:
     return urls
 
 async def download_article_images(html: str, content: str, base_url: str, article_id: int) -> List[dict]:
-    """下载文章中的所有图片，支持智能过滤和去重"""
+    """下载文章中的所有图片，支持智能过滤、并行下载和去重"""
     images = []
     url_mapping = {}  # 原始URL -> 本地路径的映射
     
@@ -526,10 +734,16 @@ async def download_article_images(html: str, content: str, base_url: str, articl
         print(f"[图片下载] 图片数量过多，只下载前20张 (总共 {len(filtered_urls)} 张)")
         filtered_urls = filtered_urls[:20]
     
-    # 下载图片
+    # 并行下载图片
     downloaded_hashes = set()  # 用于内容去重
-    async with httpx.AsyncClient() as client:
-        for url in filtered_urls:
+    successful_downloads = []
+    
+    # 控制并发数量，避免对目标网站造成过大压力
+    max_concurrent = 5  # 最多同时下载5张图片
+    
+    async def download_single_image(client, url, index):
+        """下载单张图片的包装函数"""
+        try:
             filename = await download_image(client, url, article_id, base_url)
             if filename:
                 # 检查内容去重（基于文件哈希）
@@ -542,21 +756,44 @@ async def download_article_images(html: str, content: str, base_url: str, articl
                         # 重复图片，删除文件
                         os.remove(filepath)
                         print(f"[图片下载] 重复图片，跳过: {url[:80]}...")
-                        continue
+                        return None
                     
                     downloaded_hashes.add(content_hash)
                     
                     local_path = f'/images/{filename}'
-                    images.append({
+                    print(f"[图片下载] 下载成功 [{index+1}/{len(filtered_urls)}]: {url[:50]}... -> {local_path}")
+                    return {
                         'original_url': url,
                         'local_path': local_path,
                         'filename': filename,
                         'content_hash': content_hash
-                    })
-                    url_mapping[url] = local_path
-                    print(f"[图片下载] 下载成功: {url[:50]}... -> {local_path}")
+                    }
                 except Exception as e:
                     print(f"[图片下载] 处理图片失败 {url}: {e}")
+                    return None
+        except Exception as e:
+            print(f"[图片下载] 下载图片失败 {url}: {e}")
+            return None
+    
+    # 使用信号量控制并发
+    semaphore = asyncio.Semaphore(max_concurrent)
+    
+    async def download_with_semaphore(client, url, index):
+        async with semaphore:
+            return await download_single_image(client, url, index)
+    
+    # 并行下载
+    async with httpx.AsyncClient() as client:
+        tasks = [download_with_semaphore(client, url, i) for i, url in enumerate(filtered_urls)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # 处理结果
+        for result in results:
+            if isinstance(result, dict) and result:
+                successful_downloads.append(result)
+                url_mapping[result['original_url']] = result['local_path']
+    
+    images = successful_downloads
     
     # 替换内容中的图片URL为本地路径
     updated_content = content
@@ -574,19 +811,224 @@ async def download_article_images(html: str, content: str, base_url: str, articl
 
 # ==================== API路由 ====================
 
+# 添加静态文件服务
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 # 添加图片静态文件服务
 app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
 
 @app.get("/")
 async def index():
     """返回前端页面"""
-    index_path = os.path.join(STATIC_DIR, "index.html")
+    index_path = os.path.join(STATIC_DIR, "index_v3.html")
     with open(index_path, "r", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
+@app.get("/extension/update")
+async def extension_update_page():
+    """返回扩展更新页面"""
+    update_path = os.path.join(STATIC_DIR, "extension-update.html")
+    with open(update_path, "r", encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+# ==================== 认证 API ====================
+
+@app.get("/login")
+async def login_page():
+    """返回登录页面"""
+    login_path = os.path.join(STATIC_DIR, "login.html")
+    if os.path.exists(login_path):
+        with open(login_path, "r", encoding="utf-8") as f:
+            return HTMLResponse(f.read())
+    return HTMLResponse("<h1>login.html 不存在</h1>", status_code=500)
+
+
+class LoginRequest(BaseModel):
+    password: str
+
+
+@app.post("/api/auth/login")
+async def api_login(req: LoginRequest, request: Request, response: Response):
+    """登录"""
+    client_ip = request.client.host if request.client else "unknown"
+
+    # 检查是否被锁定
+    allowed, remaining = check_login_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=429,
+            content={"success": False, "error": f"登录尝试过多，请 {remaining} 秒后再试"},
+        )
+
+    conn = get_db()
+    try:
+        config = load_config()
+        username = config.get("username", "admin")
+        user = get_user_by_username(conn, username)
+
+        # 首次使用：还没有用户
+        if user is None:
+            return JSONResponse(
+                status_code=200,
+                content={"success": False, "need_setup": True, "error": "请先设置管理员密码"},
+            )
+
+        # 验证密码
+        if not verify_password(req.password, user["password_hash"]):
+            record_login_failure(client_ip)
+            return JSONResponse(
+                status_code=401,
+                content={"success": False, "error": "密码错误"},
+            )
+
+        # 登录成功
+        clear_login_attempts(client_ip)
+        update_last_login(conn, user["id"])
+
+        token = create_token(user["id"], user["username"], user["role"])
+        resp = JSONResponse(content={
+            "success": True,
+            "user": {"username": user["username"], "role": user["role"]},
+        })
+        set_auth_cookie(resp, token)
+        return resp
+    finally:
+        conn.close()
+
+
+@app.post("/api/auth/logout")
+async def api_logout():
+    """登出"""
+    resp = JSONResponse(content={"success": True})
+    clear_auth_cookie(resp)
+    return resp
+
+
+@app.get("/api/auth/status")
+async def api_auth_status(request: Request):
+    """检查认证状态（无需登录）"""
+    user = get_current_user(request)
+    config = load_config()
+    conn = get_db()
+    try:
+        need_setup = not has_any_user(conn)
+        return {
+            "authenticated": user is not None,
+            "user": user if user else None,
+            "guest_enabled": config.get("guest_enabled", True),
+            "need_setup": need_setup,
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/api/auth/me")
+async def api_auth_me(request: Request):
+    """获取当前用户信息"""
+    user = require_auth(request)
+    return {"user": user}
+
+
+class SetupRequest(BaseModel):
+    password: str
+    username: Optional[str] = "admin"
+
+
+@app.post("/api/auth/setup")
+async def api_setup(req: SetupRequest, request: Request, response: Response):
+    """首次使用：设置管理员密码"""
+    conn = get_db()
+    try:
+        if has_any_user(conn):
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "管理员已存在，请直接登录"},
+            )
+
+        # 密码强度校验
+        if len(req.password) < 6:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "密码至少6个字符"},
+            )
+
+        username = req.username or "admin"
+        user_id = create_user(conn, username, req.password, "admin")
+
+        token = create_token(user_id, username, "admin")
+        resp = JSONResponse(content={
+            "success": True,
+            "user": {"username": username, "role": "admin"},
+        })
+        set_auth_cookie(resp, token)
+        return resp
+    finally:
+        conn.close()
+
+
+class PasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@app.put("/api/auth/password")
+async def api_change_password(req: PasswordRequest, request: Request):
+    """修改密码"""
+    user = require_auth(request)
+    conn = get_db()
+    try:
+        db_user = get_user_by_username(conn, user["username"])
+        if not db_user or not verify_password(req.old_password, db_user["password_hash"]):
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "旧密码错误"},
+            )
+        if len(req.new_password) < 6:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "新密码至少6个字符"},
+            )
+        update_password(conn, db_user["id"], req.new_password)
+        return {"success": True, "message": "密码已更新"}
+    finally:
+        conn.close()
+
+def _background_download_images(html: str, content: str, url: str, article_id: int):
+    """后台下载文章图片（同步包装）"""
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        images, updated_content = loop.run_until_complete(
+            download_article_images(html, content, url, article_id)
+        )
+        loop.close()
+        
+        # 保存图片记录和更新内容
+        conn = get_db()
+        try:
+            now = datetime.now().isoformat()
+            for img in images:
+                conn.execute("""
+                    INSERT INTO images (article_id, original_url, local_path, filename, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (article_id, img['original_url'], img['local_path'], img['filename'], now))
+            
+            if updated_content != content:
+                conn.execute(
+                    "UPDATE articles SET content = ? WHERE id = ?",
+                    (updated_content, article_id)
+                )
+            conn.commit()
+            print(f"[后台] 文章 {article_id} 图片下载完成: {len(images)} 张")
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[后台] 文章 {article_id} 图片下载失败: {e}")
+
 @app.post("/api/save")
-async def save_article(article: ArticleCreate):
-    """保存文章"""
+async def save_article(article: ArticleCreate, background_tasks: BackgroundTasks):
+    """保存文章（立即返回，图片后台下载）"""
     conn = get_db()
     
     try:
@@ -598,16 +1040,23 @@ async def save_article(article: ArticleCreate):
         if existing:
             raise HTTPException(status_code=400, detail="该链接已保存")
         
-        # 抓取文章
-        data = fetch_article(article.url, article.title)
+        # 抓取文章（线程池执行，不阻塞事件循环）
+        data = await asyncio.to_thread(fetch_article, article.url)
+        
+        # 如果提供了标题，使用提供的标题
+        if article.title:
+            data['title'] = article.title
         
         # 插入数据库
         now = datetime.now().isoformat()
         tags = json.dumps(article.tags or [], ensure_ascii=False)
         
+        # 获取封面图 URL
+        lead_image_url = data.get('lead_image_url', '')
+        
         cursor = conn.execute("""
-            INSERT INTO articles (url, title, content, excerpt, tags, created_at, word_count, reading_time)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO articles (url, title, content, excerpt, tags, created_at, word_count, reading_time, lead_image_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data["url"],
             data["title"],
@@ -616,45 +1065,62 @@ async def save_article(article: ArticleCreate):
             tags,
             now,
             data["word_count"],
-            data["reading_time"]
+            data["reading_time"],
+            lead_image_url
         ))
         
         article_id = cursor.lastrowid
         conn.commit()
         
-        # 下载图片（异步）
-        images, updated_content = await download_article_images(
-            data["html"], 
-            data["content"], 
-            data["url"], 
-            article_id
-        )
-        
-        # 保存图片记录
-        for img in images:
-            conn.execute("""
-                INSERT INTO images (article_id, original_url, local_path, filename, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, (article_id, img['original_url'], img['local_path'], img['filename'], now))
-        
-        # 更新文章内容（如果图片URL被替换）
-        if updated_content != data["content"]:
-            conn.execute(
-                "UPDATE articles SET content = ? WHERE id = ?",
-                (updated_content, article_id)
+        # 图片后台下载，不阻塞返回
+        if data.get("html"):
+            background_tasks.add_task(
+                _background_download_images,
+                data["html"],
+                data["content"],
+                data["url"],
+                article_id
             )
-        
-        conn.commit()
         
         return {
             "success": True,
             "message": "保存成功",
             "article_id": article_id,
-            "images_count": len(images)
+            "images_pending": bool(data.get("html"))
         }
     except HTTPException:
         raise
     except Exception as e:
+        # 记录抓取失败
+        error_type = "unknown"
+        error_msg = str(e)
+        
+        # 根据错误信息判断错误类型
+        if "timeout" in error_msg.lower():
+            error_type = "timeout"
+        elif "403" in error_msg or "forbidden" in error_msg.lower():
+            error_type = "http_error"
+        elif "404" in error_msg or "not found" in error_msg.lower():
+            error_type = "http_error"
+        elif "connection" in error_msg.lower():
+            error_type = "network"
+        elif "captcha" in error_msg.lower() or "验证" in error_msg or "CAPTCHA_REQUIRED" in error_msg:
+            error_type = "captcha"
+            # 提取用户友好的消息
+            if "CAPTCHA_REQUIRED:" in error_msg:
+                error_msg = error_msg.replace("CAPTCHA_REQUIRED:", "")
+        elif "parse" in error_msg.lower() or "提取" in error_msg:
+            error_type = "parse"
+        
+        record_fetch_error(
+            conn,
+            url=article.url,
+            error_type=error_type,
+            error_message=error_msg,
+            title=article.title or '',
+            metadata={"source": "save_article"}
+        )
+        
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
@@ -681,8 +1147,8 @@ async def refetch_article(article_id: int):
         conn.execute("DELETE FROM images WHERE article_id = ?", (article_id,))
         conn.commit()
         
-        # 重新抓取文章
-        data = fetch_article(url)
+        # 重新抓取文章（线程池执行）
+        data = await asyncio.to_thread(fetch_article, url)
         
         # 更新文章内容
         now = datetime.now().isoformat()
@@ -790,6 +1256,12 @@ async def list_articles(
     reading_time_max: Optional[int] = None
 ):
     """获取文章列表"""
+    # 尝试从缓存获取
+    cache_key = f"articles_{page}_{per_page}_{is_read}_{is_favorite}_{is_archived}_{tag}_{search}_{sort}_{order}_{time_filter}_{reading_time_min}_{reading_time_max}"
+    cached = article_cache.get(cache_key)
+    if cached:
+        return cached
+    
     conn = get_db()
     
     # 构建查询
@@ -886,7 +1358,8 @@ async def list_articles(
             "is_archived": bool(row["is_archived"]),
             "created_at": row["created_at"],
             "word_count": row["word_count"],
-            "reading_time": row["reading_time"]
+            "reading_time": row["reading_time"],
+            "lead_image_url": row["lead_image_url"] if "lead_image_url" in row.keys() else ""
         })
     
     return {
@@ -921,7 +1394,8 @@ async def get_article(article_id: int):
         "is_archived": bool(row["is_archived"]),
         "created_at": row["created_at"],
         "word_count": row["word_count"],
-        "reading_time": row["reading_time"]
+        "reading_time": row["reading_time"],
+        "lead_image_url": row["lead_image_url"] if "lead_image_url" in row.keys() else ""
     }
 
 @app.put("/api/articles/{article_id}")
@@ -976,6 +1450,12 @@ async def update_article(article_id: int, update: ArticleUpdate):
     finally:
         conn.close()
 
+@app.patch("/api/articles/{article_id}")
+async def patch_article(article_id: int, update: ArticleUpdate):
+    """更新文章（PATCH方法）"""
+    # 复用PUT端点的逻辑
+    return await update_article(article_id, update)
+
 @app.delete("/api/articles/{article_id}")
 async def delete_article(article_id: int):
     """删除文章"""
@@ -999,6 +1479,11 @@ async def delete_article(article_id: int):
 @app.get("/api/stats")
 async def get_stats():
     """获取统计信息"""
+    # 尝试从缓存获取
+    cached = stats_cache.get("stats")
+    if cached:
+        return cached
+    
     conn = get_db()
     
     total = conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
@@ -1007,15 +1492,25 @@ async def get_stats():
     favorites = conn.execute("SELECT COUNT(*) FROM articles WHERE is_favorite = 1").fetchone()[0]
     archived = conn.execute("SELECT COUNT(*) FROM articles WHERE is_archived = 1").fetchone()[0]
     
+    # 本周新增
+    from datetime import datetime, timedelta, timezone
+    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    this_week = conn.execute(
+        "SELECT COUNT(*) FROM articles WHERE created_at >= ?", (week_ago,)
+    ).fetchone()[0]
+    
     conn.close()
     
-    return {
+    result = {
         "total": total,
         "read": read,
         "unread": unread,
         "favorites": favorites,
-        "archived": archived
+        "archived": archived,
+        "this_week": this_week
     }
+    stats_cache.set("stats", result)
+    return result
 
 # ==================== 导出功能 ====================
 
@@ -1147,6 +1642,701 @@ async def export_articles(format: str, article_ids: Optional[str] = None):
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"导出失败: {str(e)}")
+    finally:
+        conn.close()
+
+# ==================== 批注功能 API ====================
+
+class AnnotationCreate(BaseModel):
+    article_id: int
+    highlight_text: str
+    start_offset: int
+    end_offset: int
+    note: Optional[str] = ''
+    color: Optional[str] = '#ffeb3b'
+
+class AnnotationUpdate(BaseModel):
+    note: Optional[str] = None
+    color: Optional[str] = None
+
+@app.get("/api/annotations/stats")
+async def api_get_annotations_stats():
+    """获取批注统计信息"""
+    conn = get_db()
+    try:
+        stats = get_annotations_stats(conn)
+        return stats
+    finally:
+        conn.close()
+
+@app.get("/api/annotations/all")
+async def api_get_all_annotations(limit: int = 50, offset: int = 0):
+    """获取所有批注（带分页）"""
+    conn = get_db()
+    try:
+        annotations = get_all_annotations(conn, limit=limit, offset=offset)
+        return {"annotations": annotations, "count": len(annotations)}
+    finally:
+        conn.close()
+
+@app.get("/api/articles/{article_id}/annotations")
+async def api_get_article_annotations(article_id: int):
+    """获取文章的所有批注"""
+    conn = get_db()
+    try:
+        # 验证文章存在
+        article = conn.execute("SELECT id FROM articles WHERE id = ?", (article_id,)).fetchone()
+        if not article:
+            raise HTTPException(status_code=404, detail="文章不存在")
+        
+        annotations = get_annotations(conn, article_id)
+        return {"annotations": annotations, "count": len(annotations)}
+    finally:
+        conn.close()
+
+@app.post("/api/annotations")
+async def api_create_annotation(annotation: AnnotationCreate):
+    """创建批注"""
+    conn = get_db()
+    try:
+        result = create_annotation(
+            conn,
+            article_id=annotation.article_id,
+            highlight_text=annotation.highlight_text,
+            start_offset=annotation.start_offset,
+            end_offset=annotation.end_offset,
+            note=annotation.note or '',
+            color=annotation.color or '#ffeb3b'
+        )
+        return {"success": True, "annotation": result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建批注失败: {str(e)}")
+    finally:
+        conn.close()
+
+@app.get("/api/annotations/{annotation_id}")
+async def api_get_annotation(annotation_id: int):
+    """获取单个批注详情"""
+    conn = get_db()
+    try:
+        annotation = get_annotation(conn, annotation_id)
+        if not annotation:
+            raise HTTPException(status_code=404, detail="批注不存在")
+        return annotation
+    finally:
+        conn.close()
+
+@app.put("/api/annotations/{annotation_id}")
+async def api_update_annotation(annotation_id: int, update: AnnotationUpdate):
+    """更新批注"""
+    conn = get_db()
+    try:
+        result = update_annotation(
+            conn,
+            annotation_id=annotation_id,
+            note=update.note,
+            color=update.color
+        )
+        if not result:
+            raise HTTPException(status_code=404, detail="批注不存在")
+        return {"success": True, "annotation": result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.delete("/api/annotations/{annotation_id}")
+async def api_delete_annotation(annotation_id: int):
+    """删除批注"""
+    conn = get_db()
+    try:
+        success = delete_annotation(conn, annotation_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="批注不存在")
+        return {"success": True}
+    finally:
+        conn.close()
+
+# ==================== 抓取错误管理 API ====================
+
+@app.get("/api/fetch-errors/stats")
+async def api_get_fetch_errors_stats():
+    """获取抓取错误统计"""
+    conn = get_db()
+    try:
+        stats = get_fetch_errors_stats(conn)
+        return stats
+    finally:
+        conn.close()
+
+@app.get("/api/fetch-errors")
+async def api_get_fetch_errors(unresolved_only: bool = True, limit: int = 50, offset: int = 0):
+    """获取抓取错误列表"""
+    conn = get_db()
+    try:
+        errors = get_fetch_errors(conn, unresolved_only=unresolved_only, limit=limit, offset=offset)
+        return {"errors": errors, "count": len(errors)}
+    finally:
+        conn.close()
+
+@app.get("/api/fetch-errors/{error_id}")
+async def api_get_fetch_error(error_id: int):
+    """获取单个抓取错误详情"""
+    conn = get_db()
+    try:
+        error = get_fetch_error(conn, error_id)
+        if not error:
+            raise HTTPException(status_code=404, detail="错误记录不存在")
+        return error
+    finally:
+        conn.close()
+
+@app.post("/api/fetch-errors/{error_id}/resolve")
+async def api_resolve_fetch_error(error_id: int):
+    """标记抓取错误为已解决"""
+    conn = get_db()
+    try:
+        success = resolve_fetch_error(conn, error_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="错误记录不存在")
+        return {"success": True}
+    finally:
+        conn.close()
+
+@app.post("/api/fetch-errors/{error_id}/retry")
+async def api_retry_fetch_error(error_id: int):
+    """重试抓取失败的URL"""
+    conn = get_db()
+    try:
+        error = get_fetch_error(conn, error_id)
+        if not error:
+            raise HTTPException(status_code=404, detail="错误记录不存在")
+        
+        url = error["url"]
+        title = error.get("title", "")
+        
+        # 尝试重新抓取
+        try:
+            data = await asyncio.to_thread(fetch_article, url, title if title else None)
+            
+            # 抓取成功，保存文章
+            now = datetime.now().isoformat()
+            tags = json.dumps([], ensure_ascii=False)
+            
+            # 获取封面图 URL
+            lead_image_url = data.get('lead_image_url', '')
+            
+            cursor = conn.execute("""
+                INSERT INTO articles (url, title, content, excerpt, tags, created_at, word_count, reading_time, lead_image_url)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                data["url"],
+                data["title"],
+                data["content"],
+                data["excerpt"],
+                tags,
+                now,
+                data["word_count"],
+                data["reading_time"],
+                lead_image_url
+            ))
+            
+            article_id = cursor.lastrowid
+            
+            # 应用自动标签规则
+            matched_tags = apply_rules_to_article(conn, article_id, data["url"], data["title"], data["content"])
+            if matched_tags:
+                conn.execute(
+                    "UPDATE articles SET tags = ? WHERE id = ?",
+                    (json.dumps(matched_tags, ensure_ascii=False), article_id)
+                )
+            
+            conn.commit()
+            
+            # 标记错误为已解决
+            resolve_fetch_error(conn, error_id)
+            
+            return {
+                "success": True,
+                "message": "抓取成功",
+                "article_id": article_id,
+                "title": data["title"]
+            }
+        except Exception as e:
+            # 抓取仍然失败，更新错误记录
+            record_fetch_error(
+                conn,
+                url=url,
+                error_type="retry_failed",
+                error_message=str(e),
+                title=title
+            )
+            return {
+                "success": False,
+                "message": f"重试失败: {str(e)}"
+            }
+    finally:
+        conn.close()
+
+@app.delete("/api/fetch-errors/{error_id}")
+async def api_delete_fetch_error(error_id: int):
+    """删除抓取错误记录"""
+    conn = get_db()
+    try:
+        success = delete_fetch_error(conn, error_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="错误记录不存在")
+        return {"success": True}
+    finally:
+        conn.close()
+
+@app.delete("/api/fetch-errors/clear-resolved")
+async def api_clear_resolved_errors():
+    """清除所有已解决的错误记录"""
+    conn = get_db()
+    try:
+        count = clear_resolved_errors(conn)
+        return {"success": True, "deleted_count": count}
+    finally:
+        conn.close()
+
+# ==================== 自动标签规则 API ====================
+
+class TagRuleCreate(BaseModel):
+    name: str
+    rule_type: str
+    pattern: str
+    tags: List[str]
+    priority: Optional[int] = 0
+
+class TagRuleUpdate(BaseModel):
+    name: Optional[str] = None
+    rule_type: Optional[str] = None
+    pattern: Optional[str] = None
+    tags: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+    priority: Optional[int] = None
+
+@app.get("/api/rules/stats")
+async def api_get_rules_stats():
+    """获取规则统计信息"""
+    conn = get_db()
+    try:
+        stats = get_rules_stats(conn)
+        return stats
+    finally:
+        conn.close()
+
+@app.get("/api/rules")
+async def api_get_rules():
+    """获取所有标签规则"""
+    conn = get_db()
+    try:
+        rules = get_all_rules(conn)
+        return {"rules": rules}
+    finally:
+        conn.close()
+
+@app.post("/api/rules")
+async def api_create_rule(rule: TagRuleCreate):
+    """创建标签规则"""
+    conn = get_db()
+    try:
+        result = create_rule(
+            conn,
+            name=rule.name,
+            rule_type=rule.rule_type,
+            pattern=rule.pattern,
+            tags=rule.tags,
+            priority=rule.priority or 0
+        )
+        return {"success": True, "rule": result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.get("/api/rules/{rule_id}")
+async def api_get_rule(rule_id: int):
+    """获取单个规则详情"""
+    conn = get_db()
+    try:
+        rule = get_rule(conn, rule_id)
+        if not rule:
+            raise HTTPException(status_code=404, detail="规则不存在")
+        return rule
+    finally:
+        conn.close()
+
+@app.put("/api/rules/{rule_id}")
+async def api_update_rule(rule_id: int, update: TagRuleUpdate):
+    """更新标签规则"""
+    conn = get_db()
+    try:
+        success = update_rule(
+            conn,
+            rule_id=rule_id,
+            name=update.name,
+            rule_type=update.rule_type,
+            pattern=update.pattern,
+            tags=update.tags,
+            is_active=update.is_active,
+            priority=update.priority
+        )
+        if not success:
+            raise HTTPException(status_code=404, detail="规则不存在")
+        
+        # 获取更新后的规则
+        rule = get_rule(conn, rule_id)
+        return {"success": True, "rule": rule}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+@app.delete("/api/rules/{rule_id}")
+async def api_delete_rule(rule_id: int):
+    """删除标签规则"""
+    conn = get_db()
+    try:
+        success = delete_rule(conn, rule_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="规则不存在")
+        return {"success": True}
+    finally:
+        conn.close()
+
+@app.post("/api/rules/apply-all")
+async def api_apply_rules_to_all():
+    """将所有规则应用到所有文章"""
+    conn = get_db()
+    try:
+        result = apply_rules_to_all(conn)
+        return {"success": True, "result": result}
+    finally:
+        conn.close()
+
+# ==================== RSS ====================
+
+@app.get("/api/rss")
+async def rss_feed(request: Request):
+    """生成 RSS 2.0 订阅源"""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM articles WHERE is_archived = 0 ORDER BY created_at DESC LIMIT 50"
+    ).fetchall()
+    conn.close()
+
+    base_url = str(request.base_url).rstrip('/')
+    
+    items = []
+    for row in rows:
+        title = (row["title"] or "无标题").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        link = row["url"] or ""
+        excerpt = (row["excerpt"] or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        content = (row["content"] or "")[:2000]
+        content = content.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        pub_date = row["created_at"] or ""
+        # 格式化为 RFC 822 日期
+        try:
+            dt = datetime.fromisoformat(pub_date)
+            pub_date_rfc = dt.strftime("%a, %d %b %Y %H:%M:%S +0000")
+        except Exception as e:
+            pub_date_rfc = pub_date
+        
+        items.append(f"""    <item>
+      <title>{title}</title>
+      <link>{link}</link>
+      <description>{excerpt}</description>
+      <content:encoded><![CDATA[{row["content"] or ""}]]></content:encoded>
+      <pubDate>{pub_date_rfc}</pubDate>
+      <guid isPermaLink="false">readlater-{row["id"]}</guid>
+    </item>""")
+
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>ReadLater - 我的文章收藏</title>
+    <link>{base_url}</link>
+    <description>ReadLater 稍后阅读应用的文章订阅源</description>
+    <language>zh-cn</language>
+    <lastBuildDate>{datetime.now().strftime("%a, %d %b %Y %H:%M:%S +0000")}</lastBuildDate>
+{chr(10).join(items)}
+  </channel>
+</rss>"""
+
+    from fastapi.responses import Response
+    return Response(content=xml, media_type="application/rss+xml; charset=utf-8")
+
+# ==================== RSS 订阅管理 ====================
+
+from backend.rss import get_rss_manager
+
+@app.post("/api/rss/subscribe")
+async def add_rss_subscription(feed: ArticleCreate):
+    """添加 RSS 订阅"""
+    rss = get_rss_manager(DB_PATH)
+    
+    try:
+        feed_id = await rss.add_subscription(
+            url=feed.url,
+            title=feed.title,
+            tags=feed.tags or []
+        )
+        return {"success": True, "feed_id": feed_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/rss/subscriptions")
+async def get_rss_subscriptions():
+    """获取所有 RSS 订阅"""
+    rss = get_rss_manager(DB_PATH)
+    return {"subscriptions": rss.get_subscriptions()}
+
+@app.put("/api/rss/subscriptions/{feed_id}")
+async def update_rss_subscription(feed_id: int, update: ArticleUpdate):
+    """更新 RSS 订阅"""
+    rss = get_rss_manager(DB_PATH)
+    
+    update_data = {}
+    if update.title is not None:
+        update_data['title'] = update.title
+    if update.tags is not None:
+        update_data['tags'] = update.tags
+    
+    rss.update_subscription(feed_id, **update_data)
+    return {"success": True}
+
+@app.delete("/api/rss/subscriptions/{feed_id}")
+async def delete_rss_subscription(feed_id: int):
+    """删除 RSS 订阅"""
+    rss = get_rss_manager(DB_PATH)
+    rss.delete_subscription(feed_id)
+    return {"success": True}
+
+@app.post("/api/rss/fetch/{feed_id}")
+async def fetch_rss_feed(feed_id: int):
+    """抓取 RSS 订阅的最新文章"""
+    rss = get_rss_manager(DB_PATH)
+    conn = get_db()
+    
+    # 获取订阅信息
+    subs = rss.get_subscriptions(active_only=False)
+    feed = next((s for s in subs if s['id'] == feed_id), None)
+    
+    if not feed:
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    
+    try:
+        # 解析 feed
+        feed_data = await rss.parse_feed(feed['url'])
+        saved_count = 0
+        
+        for item in feed_data['items']:
+            # 检查是否已保存
+            if rss.is_item_saved(feed_id, item.url):
+                continue
+            
+            # 检查文章库是否已有
+            existing = conn.execute(
+                "SELECT id FROM articles WHERE url = ?", (item.url,)
+            ).fetchone()
+            
+            if existing:
+                rss.mark_item_saved(feed_id, item.url, item.title)
+                continue
+            
+            # 抓取并保存文章
+            try:
+                data = await asyncio.to_thread(fetch_article, item.url)
+                tags = list(set(feed['tags'] + item.tags))
+                now = datetime.now().isoformat()
+                
+                # 获取封面图 URL
+                lead_image_url = data.get('lead_image_url', '')
+                
+                cursor = conn.execute("""
+                    INSERT INTO articles (url, title, content, excerpt, tags, created_at, word_count, reading_time, domain, lead_image_url)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    data["url"], data["title"], data["content"], data["excerpt"],
+                    json.dumps(tags, ensure_ascii=False), now,
+                    data["word_count"], data["reading_time"], data.get("domain", ""),
+                    lead_image_url
+                ))
+                
+                article_id = cursor.lastrowid
+                conn.commit()
+                
+                # 下载图片
+                images, updated_content = await download_article_images(
+                    data["html"], data["content"], data["url"], article_id
+                )
+                
+                if updated_content != data["content"]:
+                    conn.execute(
+                        "UPDATE articles SET content = ? WHERE id = ?",
+                        (updated_content, article_id)
+                    )
+                    conn.commit()
+                
+                for img in images:
+                    conn.execute("""
+                        INSERT INTO images (article_id, original_url, local_path, filename, created_at)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (article_id, img['original_url'], img['local_path'], img['filename'], now))
+                
+                conn.commit()
+                rss.mark_item_saved(feed_id, item.url, item.title)
+                saved_count += 1
+                
+            except Exception as e:
+                print(f"保存文章失败 {item.url}: {e}")
+                continue
+        
+        # 更新最后抓取时间
+        rss.update_subscription(feed_id, last_fetched=datetime.now().isoformat())
+        
+        conn.close()
+        return {"success": True, "saved_count": saved_count, "total_items": len(feed_data['items'])}
+        
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/rss/fetch-all")
+async def fetch_all_rss_feeds():
+    """抓取所有活跃订阅"""
+    rss = get_rss_manager(DB_PATH)
+    subscriptions = rss.get_subscriptions(active_only=True)
+    
+    results = []
+    for sub in subscriptions:
+        try:
+            result = await fetch_rss_feed(sub['id'])
+            results.append({
+                "feed_id": sub['id'],
+                "title": sub['title'],
+                **result
+            })
+        except Exception as e:
+            results.append({
+                "feed_id": sub['id'],
+                "title": sub['title'],
+                "success": False,
+                "error": str(e)
+            })
+    
+    return {"results": results}
+
+@app.get("/api/rss/stats")
+async def get_rss_stats():
+    """获取 RSS 统计"""
+    rss = get_rss_manager(DB_PATH)
+    return rss.get_stats()
+
+@app.get("/api/extension/version")
+async def get_extension_version():
+    """获取浏览器扩展最新版本信息"""
+    # 这里可以从数据库或配置文件中读取，现在先硬编码
+    return {
+        "latest_version": "1.1.0",
+        "changelog": "1. 添加服务器选择功能\n2. 添加检查更新功能\n3. 修复错误提示问题",
+        "download_url": "http://localhost:8000/extension/update"
+    }
+
+# ==================== 每日新闻头条 ====================
+
+# 导入新闻模块
+try:
+    from backend.daily_news import fetch_all_news, init_news_table, save_news_to_db, get_today_news, ALL_FETCHERS
+except ImportError:
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+    from backend.daily_news import fetch_all_news, init_news_table, save_news_to_db, get_today_news, ALL_FETCHERS
+
+# 初始化新闻表
+init_news_table(DB_PATH)
+
+@app.post("/api/news/fetch")
+async def api_fetch_news(request: Request):
+    """手动抓取新闻头条"""
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    sources = body.get("sources", None)  # None=全部, 或指定来源列表
+    
+    all_items = fetch_all_news(sources)
+    
+    stats = {}
+    total = 0
+    for source_name, items in all_items.items():
+        count = save_news_to_db(items, DB_PATH)
+        stats[source_name] = count
+        total += count
+    
+    return {"success": True, "total": total, "stats": stats}
+
+@app.get("/api/news")
+async def api_get_news(source: str = None, date: str = None):
+    """获取新闻列表"""
+    conn = get_db()
+    try:
+        target_date = date or datetime.now().strftime("%Y-%m-%d")
+        
+        if source:
+            rows = conn.execute(
+                "SELECT * FROM daily_news WHERE fetch_date = ? AND source = ? ORDER BY rank",
+                (target_date, source)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM daily_news WHERE fetch_date = ? ORDER BY source, rank",
+                (target_date,)
+            ).fetchall()
+        
+        items = []
+        for row in rows:
+            r = dict(row)
+            items.append(r)
+        
+        # 按来源分组
+        grouped = {}
+        for item in items:
+            src = item.get("source", "未知")
+            if src not in grouped:
+                grouped[src] = {
+                    "source": src,
+                    "icon": item.get("source_icon", "📰"),
+                    "items": []
+                }
+            grouped[src]["items"].append(item)
+        
+        return {
+            "date": target_date,
+            "sources": list(grouped.values()),
+            "total": len(items)
+        }
+    finally:
+        conn.close()
+
+@app.get("/api/news/sources")
+async def api_get_news_sources():
+    """获取可用新闻来源列表"""
+    sources = []
+    for name, _ in ALL_FETCHERS:
+        sources.append({"name": name, "enabled": True})
+    return {"sources": sources}
+
+@app.delete("/api/news")
+async def api_clear_news(date: str = None):
+    """清除指定日期的新闻（默认清除今天）"""
+    conn = get_db()
+    try:
+        target_date = date or datetime.now().strftime("%Y-%m-%d")
+        conn.execute("DELETE FROM daily_news WHERE fetch_date = ?", (target_date,))
+        conn.commit()
+        return {"success": True, "cleared_date": target_date}
     finally:
         conn.close()
 

@@ -188,12 +188,41 @@ def get_all_rules(conn: sqlite3.Connection) -> List[Dict]:
     } for row in rows]
 
 
+def get_rule(conn: sqlite3.Connection, rule_id: int) -> Optional[Dict]:
+    """获取单个标签规则"""
+    row = conn.execute(
+        "SELECT * FROM tag_rules WHERE id = ?", (rule_id,)
+    ).fetchone()
+    
+    if not row:
+        return None
+    
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "rule_type": row["rule_type"],
+        "pattern": row["pattern"],
+        "tags": json.loads(row["tags"]),
+        "is_active": bool(row["is_active"]),
+        "priority": row["priority"],
+        "created_at": row["created_at"]
+    }
+
+
 def update_rule(conn: sqlite3.Connection, rule_id: int, **kwargs) -> bool:
     """更新标签规则"""
+    # 检查规则是否存在
+    existing = get_rule(conn, rule_id)
+    if not existing:
+        return False
+    
     updates = []
     params = []
 
     for key, value in kwargs.items():
+        if value is None:
+            continue  # 跳过None值
+            
         if key == "tags":
             updates.append("tags = ?")
             params.append(json.dumps(value, ensure_ascii=False))
@@ -250,4 +279,42 @@ def apply_rules_to_all(conn: sqlite3.Connection) -> Dict:
         "total_articles": len(rows),
         "updated": updated,
         "total_tags_added": total_tags_added
+    }
+
+
+def get_rules_stats(conn: sqlite3.Connection) -> Dict:
+    """获取规则统计信息"""
+    # 总规则数
+    total = conn.execute("SELECT COUNT(*) as count FROM tag_rules").fetchone()["count"]
+    
+    # 活跃规则数
+    active = conn.execute("SELECT COUNT(*) as count FROM tag_rules WHERE is_active = 1").fetchone()["count"]
+    
+    # 按类型统计
+    type_stats = conn.execute("""
+        SELECT rule_type, COUNT(*) as count 
+        FROM tag_rules 
+        GROUP BY rule_type 
+        ORDER BY count DESC
+    """).fetchall()
+    
+    # 最近创建的规则
+    recent = conn.execute("""
+        SELECT id, name, rule_type, created_at 
+        FROM tag_rules 
+        ORDER BY created_at DESC 
+        LIMIT 5
+    """).fetchall()
+    
+    return {
+        "total": total,
+        "active": active,
+        "inactive": total - active,
+        "by_type": {row["rule_type"]: row["count"] for row in type_stats},
+        "recent_rules": [{
+            "id": row["id"],
+            "name": row["name"],
+            "rule_type": row["rule_type"],
+            "created_at": row["created_at"]
+        } for row in recent]
     }

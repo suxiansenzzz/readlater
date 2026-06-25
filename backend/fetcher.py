@@ -1,7 +1,7 @@
 """
-ReadLater - 网页抓取增强版 v2.0
+ReadLater - 网页抓取增强版 v3.0
 支持知乎、CSDN等需要特殊处理的网站
-集成反爬虫模块：Playwright浏览器 + ddddocr验证码识别
+集成反爬虫模块 v3.0：智能滑块处理 + 2captcha服务 + 用户友好提示
 """
 import os
 import re
@@ -13,8 +13,12 @@ from typing import Optional, List, Tuple, Dict, Any
 import httpx
 
 # 导入反爬模块
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 try:
-    from anticrawl import AntiCrawlFetcher, fetch_sync, CaptchaType
+    from anticrawl import AntiCrawlFetcher, fetch_sync, CaptchaType, FetchResult
     ANTICRAWL_AVAILABLE = True
 except ImportError as e:
     ANTICRAWL_AVAILABLE = False
@@ -75,7 +79,12 @@ def is_article_image(url: str, base_url: str) -> bool:
         'otter_avatar',                                # 少数派头像占位图
         '/icons/',                                     # 图标目录
         'logo.gif',                                    # 网站logo
+        'logo.png',                                    # 网站logo
+        'logo.jpg',                                    # 网站logo
+        'logo.webp',                                   # 网站logo
         'ghs.png',                                     # 备案图标
+        'favicon.ico',                                 # 网站图标
+        'favicon.png',                                 # 网站图标
     ]
     
     for pattern in skip_patterns:
@@ -93,6 +102,78 @@ def is_article_image(url: str, base_url: str) -> bool:
     return True
 
 
+def extract_lead_image(html: str, base_url: str) -> Optional[str]:
+    """
+    从HTML中提取封面图URL
+    优先级：og:image > twitter:image > 第一张内容图片
+    """
+    from bs4 import BeautifulSoup
+    
+    soup = BeautifulSoup(html, 'html.parser')
+    
+    # 1. 尝试从 og:image 获取
+    og_image = soup.find('meta', property='og:image')
+    if og_image and og_image.get('content'):
+        img_url = og_image['content']
+        if img_url.startswith('//'):
+            img_url = 'https:' + img_url
+        elif not img_url.startswith(('http://', 'https://')):
+            img_url = urljoin(base_url, img_url)
+        print(f"从 og:image 获取封面图: {img_url}")
+        return img_url
+    
+    # 2. 尝试从 twitter:image 获取
+    twitter_image = soup.find('meta', attrs={'name': 'twitter:image'})
+    if twitter_image and twitter_image.get('content'):
+        img_url = twitter_image['content']
+        if img_url.startswith('//'):
+            img_url = 'https:' + img_url
+        elif not img_url.startswith(('http://', 'https://')):
+            img_url = urljoin(base_url, img_url)
+        print(f"从 twitter:image 获取封面图: {img_url}")
+        return img_url
+    
+    # 3. 从文章内容中获取第一张图片
+    # 查找所有图片标签
+    img_tags = soup.find_all('img')
+    for img in img_tags:
+        src = img.get('src', '') or img.get('data-src', '') or img.get('data-original', '')
+        if not src:
+            continue
+        
+        # 转换为绝对URL
+        if src.startswith('//'):
+            src = 'https:' + src
+        elif not src.startswith(('http://', 'https://')):
+            src = urljoin(base_url, src)
+        
+        # 跳过明显的 logo 图片
+        src_lower = src.lower()
+        if '/logo' in src_lower or 'logo.' in src_lower:
+            print(f"跳过 logo 图片: {src}")
+            continue
+        
+        # 过滤掉装饰性图片
+        if is_article_image(src, base_url):
+            # 检查图片尺寸属性（如果有的话）
+            width = img.get('width', '')
+            height = img.get('height', '')
+            if width and height:
+                try:
+                    w, h = int(width), int(height)
+                    # 过滤太小的图片
+                    if w < 100 or h < 100:
+                        continue
+                except ValueError:
+                    pass
+            
+            print(f"从内容图片获取封面图: {src}")
+            return src
+    
+    print("未找到合适的封面图")
+    return None
+
+
 def needs_browser_mode(url: str) -> bool:
     """判断是否需要使用浏览器模式 - 默认不使用，除非明确需要"""
     # 只有在明确需要 JS 渲染的情况下才使用浏览器
@@ -102,12 +183,31 @@ def needs_browser_mode(url: str) -> bool:
     # 这些网站明确需要浏览器
     browser_required = [
         'mp.weixin.qq.com',  # 微信公众号需要 JS
+        'thepaper.cn',       # 澎湃新闻（Next.js客户端渲染）
+        'm.thepaper.cn',     # 澎湃新闻移动版
+        'toutiao.com',       # 今日头条（字节跳动 byted_acrawler JS虚拟机反爬）
     ]
     
     for site in browser_required:
         if site in domain:
             return True
     return False
+
+
+def is_known_unsupported(url: str) -> Optional[str]:
+    """检查是否是已知无法抓取的网站，返回用户友好的错误消息"""
+    parsed = urlparse(url)
+    domain = parsed.netloc.lower()
+    
+    unsupported_sites = {
+        'toutiao.com': '今日头条使用字节跳动 byted_acrawler 反爬系统（JS虚拟机+签名验证），暂时无法自动抓取。建议：\n1. 使用浏览器扩展保存（扩展会在真实浏览器中打开页面）\n2. 在今日头条App中复制链接，用浏览器打开后手动保存',
+        'm.toutiao.com': '今日头条使用字节跳动反爬系统，暂时无法自动抓取。建议使用浏览器扩展保存。',
+    }
+    
+    for site, message in unsupported_sites.items():
+        if site in domain:
+            return message
+    return None
 
 
 def fetch_with_httpx(url: str, timeout: int = 30) -> Optional[str]:
@@ -156,19 +256,19 @@ def fetch_with_httpx(url: str, timeout: int = 30) -> Optional[str]:
         return None
 
 
-def fetch_with_anticrawl(url: str, timeout: int = 30) -> Tuple[bool, Optional[str], Optional[str]]:
+def fetch_with_anticrawl(url: str, timeout: int = 30, twocaptcha_api_key: Optional[str] = None) -> Tuple[bool, Optional[str], Optional[str], Optional[str]]:
     """
     使用反爬模块抓取网页
     
     Returns:
-        (success, html, error)
+        (success, html, error, user_message)
     """
     if not ANTICRAWL_AVAILABLE:
         # 降级到普通 httpx
         html = fetch_with_httpx(url, timeout)
         if html:
-            return True, html, None
-        return False, None, "反爬模块不可用，httpx抓取失败"
+            return True, html, None, None
+        return False, None, "反爬模块不可用，httpx抓取失败", "无法连接到该网站，请检查网络连接"
     
     # 判断是否需要浏览器模式
     force_browser = needs_browser_mode(url)
@@ -179,27 +279,28 @@ def fetch_with_anticrawl(url: str, timeout: int = 30) -> Tuple[bool, Optional[st
         # 如果已经在事件循环中，使用同步方式调用
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(asyncio.run, fetch_with_anticrawl_async(url, force_browser=force_browser, timeout=timeout))
+            future = executor.submit(asyncio.run, fetch_with_anticrawl_async(url, force_browser=force_browser, timeout=timeout, twocaptcha_api_key=twocaptcha_api_key))
             return future.result()
     except RuntimeError:
         # 没有运行的事件循环，可以直接使用 asyncio.run
-        return asyncio.run(fetch_with_anticrawl_async(url, force_browser=force_browser, timeout=timeout))
+        return asyncio.run(fetch_with_anticrawl_async(url, force_browser=force_browser, timeout=timeout, twocaptcha_api_key=twocaptcha_api_key))
 
 
 async def fetch_with_anticrawl_async(
     url: str,
     force_browser: bool = False,
-    timeout: int = 30
-) -> Tuple[bool, Optional[str], Optional[str]]:
+    timeout: int = 30,
+    twocaptcha_api_key: Optional[str] = None
+) -> Tuple[bool, Optional[str], Optional[str], Optional[str]]:
     """
     反爬虫抓取（异步版本）
     
     Returns:
-        (success, html, error)
+        (success, html, error, user_message)
     """
-    fetcher = AntiCrawlFetcher()
+    fetcher = AntiCrawlFetcher(twocaptcha_api_key=twocaptcha_api_key)
     result = await fetcher.fetch(url, use_browser=force_browser, timeout=timeout)
-    return result.success, result.html, result.error
+    return result.success, result.html, result.error, result.user_message
 
 
 def extract_zhihu_content(html: str) -> dict:
@@ -430,8 +531,62 @@ def extract_content_by_site(html: str, url: str) -> dict:
         return extract_weixin_content(html)
     elif 'juejin.cn' in domain:
         return extract_juejin_content(html)
+    elif 'thepaper.cn' in domain:
+        return extract_thepaper_content(html)
     else:
         return extract_generic_content(html)
+
+
+def extract_thepaper_content(html: str) -> dict:
+    """从澎湃新闻页面提取内容"""
+    import json
+    
+    # 提取标题
+    title_match = re.search(r'<title[^>]*>(.*?)</title>', html, re.IGNORECASE)
+    title = title_match.group(1).strip() if title_match else "无标题"
+    title = re.sub(r'<[^>]+>', '', title)
+    title = title.replace('- 澎湃新闻', '').replace('_澎湃新闻', '').strip()
+    
+    content = ""
+    
+    # 方法1: 从 Next.js 数据中提取
+    next_data_match = re.search(r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
+    if next_data_match:
+        try:
+            data = json.loads(next_data_match.group(1))
+            if 'props' in data and 'pageProps' in data.get('props', {}):
+                page_props = data['props']['pageProps']
+                if 'data' in page_props:
+                    article_data = page_props['data']
+                    # 尝试获取文章内容
+                    if 'content' in article_data:
+                        content = article_data['content']
+                    elif 'htmlContent' in article_data:
+                        content = article_data['htmlContent']
+                    # 获取标题
+                    if 'title' in article_data and article_data['title']:
+                        title = article_data['title']
+        except Exception as e:
+            print(f"解析Next.js数据失败: {e}")
+    
+    # 方法2: 直接从HTML提取
+    if not content:
+        content_patterns = [
+            r'<div[^>]*class="[^"]*news_content[^"]*"[^>]*>(.*?)</div>',
+            r'<div[^>]*class="[^"]*content[^"]*"[^>]*>(.*?)</div>',
+            r'<article[^>]*>(.*?)</article>',
+        ]
+        for pattern in content_patterns:
+            match = re.search(pattern, html, re.DOTALL)
+            if match:
+                content = match.group(1)
+                break
+    
+    return {
+        'title': title,
+        'content': content,
+        'html': html
+    }
 
 
 def download_image(url: str, base_url: str, save_dir: str = "images") -> Optional[str]:
@@ -551,7 +706,7 @@ def replace_image_urls(content: str, base_url: str, save_dir: str = "images") ->
     return content
 
 
-def fetch_article(url: str, download_images: bool = True, use_anticrawl: bool = True) -> dict:
+def fetch_article(url: str, download_images: bool = True, use_anticrawl: bool = True, twocaptcha_api_key: Optional[str] = None) -> dict:
     """
     抓取文章的主函数
     
@@ -559,9 +714,10 @@ def fetch_article(url: str, download_images: bool = True, use_anticrawl: bool = 
         url: 文章URL
         download_images: 是否下载图片
         use_anticrawl: 是否使用反爬模块
+        twocaptcha_api_key: 2captcha API密钥（可选）
     
     Returns:
-        dict: 包含 title, content, images, error 等字段
+        dict: 包含 title, content, images, error, user_message 等字段
     """
     result = {
         'url': url,
@@ -570,18 +726,28 @@ def fetch_article(url: str, download_images: bool = True, use_anticrawl: bool = 
         'html': '',  # 添加 html 字段
         'images': [],
         'error': None,
+        'user_message': None,  # 用户友好的错误消息
         'captcha_required': False,
         'captcha_image': None,
+        'captcha_type': None,
     }
+    
+    # 检查已知无法抓取的网站（快速失败，不浪费时间尝试）
+    unsupported_msg = is_known_unsupported(url)
+    if unsupported_msg:
+        result['error'] = '该网站暂时无法抓取'
+        result['user_message'] = unsupported_msg
+        return result
     
     try:
         # 获取页面内容
         if use_anticrawl and ANTICRAWL_AVAILABLE:
             print(f"使用反爬模块抓取: {url}")
-            success, html, error = fetch_with_anticrawl(url, timeout=30)
+            success, html, error, user_message = fetch_with_anticrawl(url, timeout=30, twocaptcha_api_key=twocaptcha_api_key)
             
             if not success:
                 result['error'] = error
+                result['user_message'] = user_message
                 # 检查是否需要验证码
                 if '验证码' in str(error) or 'captcha' in str(error).lower():
                     result['captcha_required'] = True
@@ -591,6 +757,7 @@ def fetch_article(url: str, download_images: bool = True, use_anticrawl: bool = 
             html = fetch_with_httpx(url)
             if not html:
                 result['error'] = "无法获取页面内容"
+                result['user_message'] = "无法连接到该网站，请检查网络连接或URL是否正确"
                 return result
         
         # 提取内容
@@ -600,6 +767,7 @@ def fetch_article(url: str, download_images: bool = True, use_anticrawl: bool = 
         
         if not content:
             result['error'] = "无法提取文章内容"
+            result['user_message'] = "无法从该页面提取文章内容，可能是页面结构不支持或内容为空"
             return result
         
         # 下载并替换图片
@@ -616,8 +784,37 @@ def fetch_article(url: str, download_images: bool = True, use_anticrawl: bool = 
         result['content'] = content
         result['html'] = html  # 保存 HTML 用于图片提取
         
+        # 计算字数和阅读时间
+        # 移除HTML标签来计算纯文本字数
+        text_content = re.sub(r'<[^>]+>', '', content)
+        text_content = re.sub(r'\s+', ' ', text_content).strip()
+        
+        # 计算中文字数（中文字符）
+        chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', text_content))
+        # 计算英文单词数
+        english_words = len(re.findall(r'[a-zA-Z]+', text_content))
+        # 总字数（中文按字符算，英文按单词算）
+        word_count = chinese_chars + english_words
+        
+        # 阅读时间（按每分钟300字计算）
+        reading_time = max(1, round(word_count / 300))
+        
+        # 生成摘要（取前200个字符）
+        excerpt = text_content[:200].strip()
+        if len(text_content) > 200:
+            excerpt += '...'
+        
+        result['word_count'] = word_count
+        result['reading_time'] = reading_time
+        result['excerpt'] = excerpt
+        
+        # 提取封面图
+        lead_image_url = extract_lead_image(html, url)
+        result['lead_image_url'] = lead_image_url
+        
     except Exception as e:
         result['error'] = str(e)
+        result['user_message'] = f"抓取文章时发生错误: {str(e)}"
         print(f"抓取文章失败: {e}")
     
     return result

@@ -1,20 +1,19 @@
 {
   "manifest_version": 3,
   "name": "ReadLater - 稍后阅读",
-  "version": "0.3.0",
-  "description": "一键保存网页到你的ReadLater服务器，支持标签、存档、导出，带页面内保存状态反馈",
+  "version": "1.1.0",
+  "description": "一键保存网页到ReadLater，支持离线阅读和批注",
   "permissions": [
     "activeTab",
-    "storage",
-    "notifications",
-    "contextMenus"
+    "storage"
   ],
   "host_permissions": [
-    "http://*/*",
-    "https://*/*"
+    "http://localhost:8000/*",
+    "http://192.168.31.5:8000/*",
+    "https://your-readlater-server.com/*"
   ],
   "action": {
-    "default_popup": "popup/popup.html",
+    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -26,23 +25,14 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "background": {
-    "service_worker": "background.js"
-  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
       "js": ["content.js"],
-      "css": ["content.css"],
-      "run_at": "document_idle"
+      "css": ["content.css"]
     }
   ],
-  "commands": {
-    "save-page": {
-      "suggested_key": {
-        "default": "Alt+S"
-      },
-      "description": "保存当前页面"
-    }
+  "background": {
+    "service_worker": "background.js"
   }
 }

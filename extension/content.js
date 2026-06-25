@@ -1,280 +1,181 @@
-// ReadLater 内容脚本 v0.3.0
-// 在页面上显示保存状态反馈
+// ReadLater 浏览器扩展 - Content Script
 
-(function() {
-  'use strict';
-
-  // 防止重复注入
-  if (window.readlaterContentLoaded) {
-    return;
-  }
-  window.readlaterContentLoaded = true;
-
-  // Toast 容器
-  let toastContainer = null;
-  let toastCounter = 0;
-
-  // 初始化容器
-  function initContainer() {
-    if (!toastContainer) {
-      toastContainer = document.createElement('div');
-      toastContainer.className = 'readlater-toast-container';
-      toastContainer.id = 'readlater-toast-container';
-      document.body.appendChild(toastContainer);
+// 监听来自popup的消息
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'getPageContent') {
+        const content = getPageContent(request.mode);
+        sendResponse(content);
     }
-    return toastContainer;
-  }
+    return true;
+});
 
-  // 创建 Toast
-  function createToast(options) {
-    const container = initContainer();
-    const id = `readlater-toast-${++toastCounter}`;
+// 获取页面内容
+function getPageContent(mode = 'full') {
+    let content = '';
+    let title = document.title || '';
     
-    const {
-      type = 'info',        // saving, success, error, warning, info
-      title = '',
-      message = '',
-      duration = 4000,      // 自动关闭时间，0 表示不自动关闭
-      showProgress = true,
-      closable = true
-    } = options;
-
-    // 图标映射
-    const icons = {
-      saving: '⏳',
-      success: '✅',
-      error: '❌',
-      warning: '⚠️',
-      info: 'ℹ️'
+    switch(mode) {
+        case 'full':
+            // 获取完整页面内容
+            content = getFullPageContent();
+            break;
+            
+        case 'selection':
+            // 获取选中的内容
+            const selection = window.getSelection();
+            if (selection && selection.toString().trim()) {
+                content = selection.toString().trim();
+                // 尝试获取包含选中内容的HTML
+                if (selection.rangeCount > 0) {
+                    const range = selection.getRangeAt(0);
+                    const container = document.createElement('div');
+                    container.appendChild(range.cloneContents());
+                    content = container.innerHTML;
+                }
+            } else {
+                content = getFullPageContent();
+            }
+            break;
+            
+        case 'read':
+            // 获取阅读模式内容（主要文本）
+            content = getReadModeContent();
+            break;
+    }
+    
+    return {
+        title: title,
+        content: content,
+        url: window.location.href
     };
+}
 
-    // 创建 toast 元素
+// 获取完整页面内容
+function getFullPageContent() {
+    // 优先获取文章内容
+    const articleSelectors = [
+        'article',
+        '[role="article"]',
+        '.post-content',
+        '.article-content',
+        '.entry-content',
+        '.content',
+        'main'
+    ];
+    
+    for (const selector of articleSelectors) {
+        const element = document.querySelector(selector);
+        if (element && element.innerHTML.length > 200) {
+            return element.innerHTML;
+        }
+    }
+    
+    // 如果没找到文章内容，获取body内容
+    // 移除脚本和样式
+    const body = document.body.cloneNode(true);
+    const scripts = body.querySelectorAll('script, style, noscript, iframe');
+    scripts.forEach(el => el.remove());
+    
+    return body.innerHTML;
+}
+
+// 获取阅读模式内容
+function getReadModeContent() {
+    // 获取主要文本内容
+    const paragraphs = document.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote');
+    let content = '';
+    
+    paragraphs.forEach(p => {
+        const text = p.textContent.trim();
+        if (text.length > 20) {
+            content += `<${p.tagName.toLowerCase()}>${text}</${p.tagName.toLowerCase()}>`;
+        }
+    });
+    
+    return content || getFullPageContent();
+}
+
+// 注入Toast通知样式
+function injectToastStyles() {
+    const style = document.createElement('style');
+    style.textContent = `
+        .readlater-toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 8px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            z-index: 999999;
+            animation: readlater-slideIn 0.3s ease;
+        }
+        
+        @keyframes readlater-slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        .readlater-toast.success {
+            background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+        }
+        
+        .readlater-toast.error {
+            background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+// 显示Toast通知
+function showToast(message, type = 'info') {
+    injectToastStyles();
+    
+    // 确保message是字符串
+    if (typeof message === 'object') {
+        message = JSON.stringify(message);
+    }
+    
     const toast = document.createElement('div');
     toast.className = `readlater-toast ${type}`;
-    toast.id = id;
-
-    // 内容 HTML
-    let html = `
-      <div class="readlater-toast-icon">${icons[type] || icons.info}</div>
-      <div class="readlater-toast-content">
-        ${title ? `<div class="readlater-toast-title">${escapeHtml(title)}</div>` : ''}
-        ${message ? `<div class="readlater-toast-message">${escapeHtml(message)}</div>` : ''}
-      </div>
-    `;
-
-    // 关闭按钮
-    if (closable) {
-      html += `<button class="readlater-toast-close" onclick="window.readlaterRemoveToast('${id}')">✕</button>`;
-    }
-
-    // 进度条
-    if (showProgress && duration > 0) {
-      html += `<div class="readlater-toast-progress" style="width: 100%;"></div>`;
-    }
-
-    toast.innerHTML = html;
-    container.appendChild(toast);
-
-    // 触发动画
-    requestAnimationFrame(() => {
-      toast.classList.add('show');
-      
-      // 进度条动画
-      if (showProgress && duration > 0) {
-        const progress = toast.querySelector('.readlater-toast-progress');
-        if (progress) {
-          progress.style.transition = `width ${duration}ms linear`;
-          requestAnimationFrame(() => {
-            progress.style.width = '0%';
-          });
-        }
-      }
-    });
-
-    // 自动关闭
-    if (duration > 0) {
-      setTimeout(() => {
-        removeToast(id);
-      }, duration);
-    }
-
-    return id;
-  }
-
-  // 移除 Toast
-  function removeToast(id) {
-    const toast = document.getElementById(id);
-    if (toast) {
-      toast.classList.remove('show');
-      toast.classList.add('hide');
-      setTimeout(() => {
-        toast.remove();
-      }, 400);
-    }
-  }
-
-  // HTML 转义
-  function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
-
-  // 全局移除函数
-  window.readlaterRemoveToast = removeToast;
-
-  // 保存中状态
-  let savingToastId = null;
-
-  // 显示保存中
-  function showSaving(title) {
-    if (savingToastId) {
-      removeToast(savingToastId);
-    }
-    savingToastId = createToast({
-      type: 'saving',
-      title: '正在保存...',
-      message: title || '请稍候',
-      duration: 0,
-      showProgress: false,
-      closable: false
-    });
-    return savingToastId;
-  }
-
-  // 显示成功
-  function showSuccess(title, message) {
-    if (savingToastId) {
-      removeToast(savingToastId);
-      savingToastId = null;
-    }
-    return createToast({
-      type: 'success',
-      title: title || '保存成功！',
-      message: message || '',
-      duration: 3000
-    });
-  }
-
-  // 显示错误
-  function showError(title, message) {
-    if (savingToastId) {
-      removeToast(savingToastId);
-      savingToastId = null;
-    }
-    return createToast({
-      type: 'error',
-      title: title || '保存失败',
-      message: message || '请检查网络连接或服务器设置',
-      duration: 5000
-    });
-  }
-
-  // 显示信息
-  function showInfo(title, message) {
-    return createToast({
-      type: 'info',
-      title: title,
-      message: message,
-      duration: 3000
-    });
-  }
-
-  // 显示警告
-  function showWarning(title, message) {
-    return createToast({
-      type: 'warning',
-      title: title,
-      message: message,
-      duration: 4000
-    });
-  }
-
-  // 更新现有 toast
-  function updateToast(id, options) {
-    const toast = document.getElementById(id);
-    if (!toast) return;
-
-    const { title, message, type } = options;
+    toast.textContent = message;
     
-    if (type) {
-      toast.className = `readlater-toast ${type} show`;
-      const icon = toast.querySelector('.readlater-toast-icon');
-      if (icon) {
-        const icons = {
-          saving: '⏳',
-          success: '✅',
-          error: '❌',
-          warning: '⚠️',
-          info: 'ℹ️'
-        };
-        icon.textContent = icons[type] || icons.info;
-      }
-    }
-
-    if (title) {
-      const titleEl = toast.querySelector('.readlater-toast-title');
-      if (titleEl) titleEl.textContent = title;
-    }
-
-    if (message) {
-      const msgEl = toast.querySelector('.readlater-toast-message');
-      if (msgEl) msgEl.textContent = message;
-    }
-  }
-
-  // 监听来自 background 的消息
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'READLATER_STATUS') {
-      const { status, title, detail, articleId } = message;
-      
-      switch (status) {
-        case 'saving':
-          showSaving(title);
-          break;
-        case 'success':
-          showSuccess(
-            '保存成功！',
-            title ? `"${truncate(title, 30)}" 已保存` : '文章已保存到稍后阅读'
-          );
-          break;
-        case 'error':
-          showError('保存失败', detail || '请检查网络连接或服务器设置');
-          break;
-        case 'warning':
-          showWarning('注意', detail);
-          break;
-        case 'info':
-          showInfo('提示', detail);
-          break;
-        case 'duplicate':
-          showWarning('已存在', title ? `"${truncate(title, 30)}" 已经保存过了` : '该文章已保存');
-          break;
-      }
-      
-      sendResponse({ received: true });
-    }
+    document.body.appendChild(toast);
     
-    return true;
-  });
+    setTimeout(() => {
+        toast.style.animation = 'readlater-slideIn 0.3s ease reverse';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
 
-  // 字符串截断
-  function truncate(str, len) {
-    if (!str) return '';
-    return str.length > len ? str.substring(0, len) + '...' : str;
-  }
+// 监听快捷键保存
+document.addEventListener('keydown', (e) => {
+    // Ctrl+Shift+S 保存到ReadLater
+    if (e.ctrlKey && e.shiftKey && e.key === 'S') {
+        e.preventDefault();
+        showToast('正在保存到 ReadLater...', 'info');
+        
+        chrome.runtime.sendMessage({
+            action: 'savePage',
+            url: window.location.href,
+            title: document.title
+        }, (response) => {
+            if (response && response.success) {
+                showToast('保存成功！', 'success');
+            } else {
+                showToast('保存失败：' + (response?.error || '未知错误'), 'error');
+            }
+        });
+    }
+});
 
-  // 导出 API（供其他脚本使用）
-  window.ReadLaterToast = {
-    show: createToast,
-    remove: removeToast,
-    saving: showSaving,
-    success: showSuccess,
-    error: showError,
-    info: showInfo,
-    warning: showWarning,
-    update: updateToast
-  };
-
-  console.log('[ReadLater] 内容脚本已加载');
-})();
+console.log('ReadLater 扩展已加载');

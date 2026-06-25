@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>批注功能测试</title>
+    <style>
+        .highlight-text {
+            background-color: #ffeb3b;
+            padding: 2px 4px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .highlight-text[data-color="green"] { background-color: #4caf50; }
+        .highlight-text[data-color="pink"] { background-color: #e91e63; }
+        .highlight-text[data-color="blue"] { background-color: #2196f3; }
+    </style>
+</head>
+<body>
+    <h1>批注功能测试</h1>
+    <div id="articleBody">
+        <p>这是一段测试文本。忆的老式咖啡餐吧，在时代的洪流中走出了截然不同的命运轨迹。而那群在老式咖啡餐吧陪伴下长大的孩子们，总会在不同时期重新选择它们，哪怕只是为了圆自己一个童年梦想。</p>
+        <p>这是另一段文本，用于测试批注高亮功能。</p>
+    </div>
+    
+    <script>
+        // 模拟批注数据
+        const annotations = [
+            {
+                id: 1,
+                highlight_text: "忆的老式咖啡餐吧，在时代的洪流中走出了截然不同的命运轨迹。而那群在老式咖啡餐吧陪伴下长大的孩子们，总会在不同时期重新选择它们，哪怕只是为了圆自己一个童年梦想。",
+                color: "#ffeb3b",
+                note: "这段文字很有意境"
+            }
+        ];
+        
+        // 应用批注高亮
+        function applyAnnotationsHighlight() {
+            const articleBody = document.getElementById('articleBody');
+            let content = articleBody.innerHTML;
+            
+            // 按长度排序，优先替换长文本
+            annotations.sort((a, b) => b.highlight_text.length - a.highlight_text.length);
+            
+            // 为每个批注添加高亮
+            annotations.forEach(ann => {
+                const escapedText = ann.highlight_text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const colorMap = {
+                    '#ffeb3b': 'yellow',
+                    '#4caf50': 'green',
+                    '#e91e63': 'pink',
+                    '#2196f3': 'blue'
+                };
+                const colorClass = colorMap[ann.color] || 'yellow';
+                
+                // 替换文本，添加高亮span
+                const regex = new RegExp(`(${escapedText})`, 'gi');
+                const newContent = content.replace(regex, 
+                    `<span class="highlight-text" data-color="${colorClass}" data-annotation-id="${ann.id}" onclick="showAnnotationDetail(${ann.id})" title="${ann.note || '点击查看批注'}">$1</span>`
+                );
+                
+                // 只有替换成功才更新内容
+                if (newContent !== content) {
+                    content = newContent;
+                }
+            });
+            
+            articleBody.innerHTML = content;
+        }
+        
+        function showAnnotationDetail(annotationId) {
+            alert('点击了批注 ID: ' + annotationId);
+        }
+        
+        // 页面加载完成后应用批注
+        window.onload = applyAnnotationsHighlight;
+    </script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+{
+  "secret_key": "517296f2454509577f7fdc7cbd9adc5a8eca05f315621f4a58e5a177a470308f",
+  "token_expire_days": 7,
+  "guest_enabled": true,
+  "max_login_attempts": 5,
+  "lockout_minutes": 15,
+  "username": "admin"
+}
