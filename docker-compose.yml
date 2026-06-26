@@ -8,10 +8,28 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      # 数据持久化 - 数据库和图片
       - readlater_data:/data
+      # 可选：挂载本地目录（如果需要直接访问数据）
+      # - ./data:/data
     restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai
+      - DB_PATH=/data/readlater.db
+      - IMAGES_DIR=/data/images
+    # 资源限制（可选）
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    # 日志配置
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   readlater_data:

@@ -111,10 +111,10 @@ except ImportError:
         clear_login_attempts, load_config, COOKIE_NAME,
     )
 
-# 配置
-DB_PATH = os.path.join(os.path.dirname(__file__), "readlater.db")
+# 配置 - 支持环境变量覆盖（Docker部署用）
+DB_PATH = os.environ.get("DB_PATH") or os.path.join(os.path.dirname(__file__), "readlater.db")
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
-IMAGES_DIR = os.path.join(os.path.dirname(__file__), "images")
+IMAGES_DIR = os.environ.get("IMAGES_DIR") or os.path.join(os.path.dirname(__file__), "images")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

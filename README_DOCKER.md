@@ -4,59 +4,75 @@
 
 ```
 readlater/
-├── Dockerfile           # Docker 镜像构建文件
+├── Dockerfile           # Docker 镜像构建文件（多阶段构建）
 ├── docker-compose.yml   # Docker Compose 配置
 ├── .dockerignore        # Docker 构建忽略文件
-├── build.sh             # 构建脚本
-├── start.sh             # 启动脚本
-├── stop.sh              # 停止脚本
-└── DOCKER.md            # 详细文档
+├── deploy.sh            # 一键部署脚本
+└── DOCKER_README.md     # 详细部署文档
 ```
 
 ## 快速部署
 
-### 方式一：一键启动（推荐）
+### 方式一：一键部署（推荐）
 
 ```bash
-./start.sh
+chmod +x deploy.sh
+./deploy.sh
 ```
 
-脚本会自动：
-1. 检查 Docker 环境
-2. 构建镜像（如果不存在）
-3. 启动容器
-4. 检查服务状态
-
-### 方式二：手动操作
+### 方式二：手动部署
 
 ```bash
 # 1. 构建镜像
-./build.sh
+docker build -t readlater:latest .
 
 # 2. 启动容器
-docker-compose up -d
-
-# 或使用 Docker 命令
 docker run -d \
   --name readlater \
   -p 8000:8000 \
   -v readlater_data:/data \
+  -e TZ=Asia/Shanghai \
+  --restart unless-stopped \
   readlater:latest
 ```
 
-### 方式三：绿联NAS部署
+### 方式三：Docker Compose
 
-1. 在电脑上构建镜像：
-   ```bash
-   ./build.sh
-   ```
+```bash
+# 如果有 docker-compose
+docker-compose up -d
 
-2. 导出镜像：
-   ```bash
-   docker save readlater:latest | gzip > readlater.tar.gz
-   ```
+# 或者新版 docker compose
+docker compose up -d
+```
 
-3. 在绿联NAS上导入镜像并运行
+## 访问应用
+
+启动成功后访问: **http://localhost:8000**
+
+## 数据持久化
+
+数据库和图片存储在 Docker 卷 `readlater_data` 中：
+- **数据库**: `/data/readlater.db`
+- **图片**: `/data/images/`
+
+容器重启数据不会丢失。
+
+### 备份
+
+```bash
+# 备份数据库
+docker cp readlater:/data/readlater.db ./backup/
+# 备份图片
+docker cp readlater:/data/images/ ./backup/images/
+```
+
+### 恢复
+
+```bash
+docker cp ./backup/readlater.db readlater:/data/
+docker cp ./backup/images/ readlater:/data/
+```
 
 ## 常用命令
 
@@ -64,30 +80,55 @@ docker run -d \
 # 查看日志
 docker logs -f readlater
 
+# 停止服务
+docker stop readlater
+
 # 重启服务
 docker restart readlater
 
-# 停止服务
-./stop.sh
-
 # 进入容器
-docker exec -it readlater /bin/bash
+docker exec -it readlater bash
 
-# 备份数据
-docker cp readlater:/data/readlater.db ./backup/
-docker cp readlater:/data/images ./backup/
+# 删除容器
+docker rm -f readlater
 
-# 恢复数据
-docker cp ./backup/readlater.db readlater:/data/
-docker cp ./backup/images readlater:/data/
+# 删除镜像
+docker rmi readlater:latest
 ```
 
-## 访问
+## 环境变量
 
-启动后访问: http://localhost:8000
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `TZ` | `Asia/Shanghai` | 时区 |
+| `DB_PATH` | `/data/readlater.db` | 数据库路径 |
+| `IMAGES_DIR` | `/data/images` | 图片存储目录 |
 
-## 浏览器扩展配置
+## 修改端口
 
-扩展默认服务器地址：`http://192.168.31.5:8000`
+```bash
+# 映射到 9000 端口
+docker run -d --name readlater -p 9000:8000 -v readlater_data:/data readlater:latest
+```
 
-如果部署在其他地址，请在扩展设置中修改。
+## 更新应用
+
+```bash
+docker stop readlater && docker rm readlater
+docker build -t readlater:latest .
+docker run -d --name readlater -p 8000:8000 -v readlater_data:/data --restart unless-stopped readlater:latest
+```
+
+## 故障排查
+
+```bash
+# 查看容器日志
+docker logs readlater
+
+# 检查容器状态
+docker ps -a | grep readlater
+
+# 进入容器排查
+docker exec -it readlater bash
+ls -la /data/
+```

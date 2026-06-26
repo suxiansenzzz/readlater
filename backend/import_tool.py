@@ -7,7 +7,7 @@ import sqlite3
 from datetime import datetime
 import os
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "readlater.db")
+DB_PATH = os.environ.get("DB_PATH") or os.path.join(os.path.dirname(__file__), "readlater.db")
 
 def get_db():
     conn = sqlite3.connect(DB_PATH)

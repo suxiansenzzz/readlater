@@ -36,7 +36,20 @@ extension/
 ugapp/
 *.upk
 
+# Android相关（不需要在Docker中）
+android/
+android-native/
+
+# 测试文件
+test_*.html
+*_test.py
+
 # 临时文件
 *.tmp
 *.bak
 *~
+
+# Docker相关（避免递归）
+Dockerfile
+docker-compose.yml
+.dockerignore

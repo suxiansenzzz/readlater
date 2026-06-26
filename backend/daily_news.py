@@ -353,7 +353,7 @@ def fetch_all_news(sources: List[str] = None) -> Dict[str, List[NewsItem]]:
 # SQLite 持久化
 # ============================================================
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "backend", "readlater.db")
+DB_PATH = os.environ.get("DB_PATH") or os.path.join(os.path.dirname(os.path.dirname(__file__)), "backend", "readlater.db")
 
 
 def init_news_table(db_path: str = None):
