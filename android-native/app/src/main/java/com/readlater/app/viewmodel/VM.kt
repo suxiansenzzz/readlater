@@ -18,7 +18,7 @@ data class ListState(
 )
 
 class VM(app: Application) : AndroidViewModel(app) {
-    private val prefs = Prefs(app)
+    val prefs = Prefs(app)
     private fun api() = Client.get(prefs.serverUrl)
 
     private val _list = MutableStateFlow(ListState())
@@ -89,8 +89,9 @@ class VM(app: Application) : AndroidViewModel(app) {
     fun clearMsg() { _msg.value = null }
     fun clearArticle() { _article.value = null }
 
-    fun setServer(url: String) {
-        prefs.serverUrl = url
-        load()
-    }
+    fun setServer(url: String) { prefs.serverUrl = url; load() }
+    fun setFontSize(size: Int) { prefs.fontSize = size }
+    fun setSortOrder(order: String) { prefs.sortOrder = order }
+    fun setAutoArchive(v: Boolean) { prefs.autoArchive = v }
+    fun setShowImages(v: Boolean) { prefs.showImages = v }
 }

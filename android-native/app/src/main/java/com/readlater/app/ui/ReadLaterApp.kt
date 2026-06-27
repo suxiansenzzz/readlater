@@ -2,7 +2,6 @@ package com.readlater.app.ui
 
 import androidx.compose.runtime.*
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.readlater.app.data.Article
 import com.readlater.app.viewmodel.VM
 
 sealed class Screen {
@@ -39,6 +38,7 @@ fun ReadLaterApp(vm: VM = viewModel()) {
         )
         is Screen.Detail -> DetailScreen(
             article = selArticle,
+            fontSize = vm.prefs.fontSize,
             onBack = { vm.clearArticle(); screen = Screen.List },
             onFav = { id, f -> vm.update(id, fav = f) },
             onRead = { id, r -> vm.update(id, read = r) },
@@ -47,7 +47,15 @@ fun ReadLaterApp(vm: VM = viewModel()) {
         )
         is Screen.Settings -> SettingsScreen(
             url = vm.serverUrl,
+            fontSize = vm.prefs.fontSize,
+            sortOrder = vm.prefs.sortOrder,
+            autoArchive = vm.prefs.autoArchive,
+            showImages = vm.prefs.showImages,
             onSave = { u -> vm.setServer(u); screen = Screen.List },
+            onFontSize = { s -> vm.setFontSize(s) },
+            onSortOrder = { o -> vm.setSortOrder(o) },
+            onAutoArchive = { v -> vm.setAutoArchive(v) },
+            onShowImages = { v -> vm.setShowImages(v) },
             onBack = { screen = Screen.List }
         )
     }
