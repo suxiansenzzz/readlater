@@ -21,22 +21,15 @@ import androidx.compose.ui.unit.sp
 
 @Composable
 fun SettingsScreen(
-    url: String,
-    fontSize: Int,
-    sortOrder: String,
-    autoArchive: Boolean,
-    showImages: Boolean,
-    onSave: (String) -> Unit,
-    onFontSize: (Int) -> Unit,
-    onSortOrder: (String) -> Unit,
-    onAutoArchive: (Boolean) -> Unit,
-    onShowImages: (Boolean) -> Unit,
-    onBack: () -> Unit
+    url: String, fontSize: Int, sortOrder: String, autoArchive: Boolean, showImages: Boolean,
+    onSave: (String) -> Unit, onFontSize: (Int) -> Unit, onSortOrder: (String) -> Unit,
+    onAutoArchive: (Boolean) -> Unit, onShowImages: (Boolean) -> Unit, onBack: () -> Unit
 ) {
     var text by remember { mutableStateOf(url) }
+    val cardColor = LocalCardColor.current
+    val cardText = LocalCardText.current
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).verticalScroll(rememberScrollState())) {
-        // Nav bar
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = iOSBlue, modifier = Modifier.size(24.dp)) }
             Text("设置", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onBackground)
@@ -44,139 +37,100 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(4.dp))
 
-        // Section: Server
+        // Server
         SectionHeader("服务器")
-        SettingsCard {
+        SettingsCard(cardColor) {
             Column(Modifier.padding(16.dp)) {
                 Text("服务器地址", fontSize = 13.sp, color = iOSGray4, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = text, onValueChange = { text = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("http://192.168.31.5:8000", fontSize = 15.sp) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = iOSBlue, unfocusedBorderColor = iOSGray2)
-                )
+                OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("http://192.168.31.5:8000", fontSize = 15.sp) }, singleLine = true,
+                    shape = RoundedCornerShape(10.dp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = iOSBlue, unfocusedBorderColor = iOSGray2))
                 Spacer(Modifier.height(12.dp))
-                Button(
-                    onClick = { onSave(text) },
-                    modifier = Modifier.fillMaxWidth().height(44.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = iOSBlue)
-                ) { Text("保存", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
+                Button(onClick = { onSave(text) }, modifier = Modifier.fillMaxWidth().height(44.dp),
+                    shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = iOSBlue)) { Text("保存", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
             }
         }
 
         Spacer(Modifier.height(20.dp))
 
-        // Section: Reading
+        // Reading
         SectionHeader("阅读")
-        SettingsCard {
+        SettingsCard(cardColor) {
             Column {
-                // Font size
-                SettingsRow(icon = Icons.Filled.TextFields, title = "正文字号") {
+                SettingsRow(icon = Icons.Filled.TextFields, title = "正文字号", cardText = cardText) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         listOf(14 to "小", 17 to "中", 20 to "大", 24 to "特大").forEach { (size, label) ->
                             val selected = fontSize == size
-                            Surface(
-                                onClick = { onFontSize(size) },
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (selected) iOSBlue else Color.Transparent
-                            ) {
-                                Text(label, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                    fontSize = 13.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                    color = if (selected) Color.White else iOSGray5)
+                            Surface(onClick = { onFontSize(size) }, shape = RoundedCornerShape(8.dp), color = if (selected) iOSBlue else Color.Transparent) {
+                                Text(label, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp), fontSize = 13.sp,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal, color = if (selected) Color.White else iOSGray5)
                             }
                             Spacer(Modifier.width(6.dp))
                         }
                     }
                 }
-
-                HorizontalDivider(color = iOSGray2, thickness = 0.5.dp, modifier = Modifier.padding(horizontal = 16.dp))
-
-                // Sort order
-                SettingsRow(icon = Icons.AutoMirrored.Filled.Sort, title = "默认排序") {
+                Divider()
+                SettingsRow(icon = Icons.AutoMirrored.Filled.Sort, title = "默认排序", cardText = cardText) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         listOf("newest" to "最新", "oldest" to "最早").forEach { (key, label) ->
                             val selected = sortOrder == key
-                            Surface(
-                                onClick = { onSortOrder(key) },
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (selected) iOSBlue else Color.Transparent
-                            ) {
-                                Text(label, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                    fontSize = 13.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                    color = if (selected) Color.White else iOSGray5)
+                            Surface(onClick = { onSortOrder(key) }, shape = RoundedCornerShape(8.dp), color = if (selected) iOSBlue else Color.Transparent) {
+                                Text(label, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp), fontSize = 13.sp,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal, color = if (selected) Color.White else iOSGray5)
                             }
                             Spacer(Modifier.width(6.dp))
                         }
                     }
                 }
-
-                HorizontalDivider(color = iOSGray2, thickness = 0.5.dp, modifier = Modifier.padding(horizontal = 16.dp))
-
-                // Show images
-                SettingsSwitchRow(icon = Icons.Filled.Image, title = "显示封面图", checked = showImages, onToggle = onShowImages)
-
-                HorizontalDivider(color = iOSGray2, thickness = 0.5.dp, modifier = Modifier.padding(horizontal = 16.dp))
-
-                // Auto archive
-                SettingsSwitchRow(icon = Icons.Filled.Archive, title = "已读自动归档", checked = autoArchive, onToggle = onAutoArchive)
+                Divider()
+                SettingsSwitchRow(icon = Icons.Filled.Image, title = "显示封面图", checked = showImages, onToggle = onShowImages, cardText = cardText)
+                Divider()
+                SettingsSwitchRow(icon = Icons.Filled.Archive, title = "已读自动归档", checked = autoArchive, onToggle = onAutoArchive, cardText = cardText)
             }
         }
 
         Spacer(Modifier.height(20.dp))
 
-        // Section: About
+        // About
         SectionHeader("关于")
-        SettingsCard {
+        SettingsCard(cardColor) {
             Column(Modifier.padding(16.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("版本", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
-                    Text("v2.2.2", fontSize = 15.sp, color = iOSGray4)
+                    Text("版本", fontSize = 15.sp, color = cardText)
+                    Text("v2.2.3", fontSize = 15.sp, color = iOSGray4)
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("开发者", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
-                    Text("心怡", fontSize = 15.sp, color = iOSGray4)
+                    Text("项目", fontSize = 15.sp, color = cardText)
+                    Text("ReadLater", fontSize = 15.sp, color = iOSGray4)
                 }
             }
         }
-
         Spacer(Modifier.height(32.dp))
     }
 }
 
-@Composable
-fun SectionHeader(title: String) {
-    Text(title.uppercase(), fontSize = 13.sp, fontWeight = FontWeight.Medium, color = iOSGray4,
-        modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 6.dp))
+@Composable fun SectionHeader(title: String) {
+    Text(title.uppercase(), fontSize = 13.sp, fontWeight = FontWeight.Medium, color = iOSGray4, modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 6.dp))
 }
-
-@Composable
-fun SettingsCard(content: @Composable () -> Unit) {
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = RoundedCornerShape(14.dp), color = Color.White, shadowElevation = 1.dp) {
-        content()
-    }
+@Composable fun SettingsCard(color: Color, content: @Composable () -> Unit) {
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = RoundedCornerShape(14.dp), color = color, shadowElevation = 1.dp) { content() }
 }
-
-@Composable
-fun SettingsRow(icon: ImageVector, title: String, trailing: @Composable () -> Unit) {
+@Composable fun SettingsRow(icon: ImageVector, title: String, cardText: Color, trailing: @Composable () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, modifier = Modifier.size(20.dp), tint = iOSBlue)
         Spacer(Modifier.width(12.dp))
-        Text(title, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+        Text(title, fontSize = 15.sp, color = cardText, modifier = Modifier.weight(1f))
         trailing()
     }
 }
-
-@Composable
-fun SettingsSwitchRow(icon: ImageVector, title: String, checked: Boolean, onToggle: (Boolean) -> Unit) {
+@Composable fun SettingsSwitchRow(icon: ImageVector, title: String, checked: Boolean, onToggle: (Boolean) -> Unit, cardText: Color) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, modifier = Modifier.size(20.dp), tint = iOSBlue)
         Spacer(Modifier.width(12.dp))
-        Text(title, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+        Text(title, fontSize = 15.sp, color = cardText, modifier = Modifier.weight(1f))
         Switch(checked = checked, onCheckedChange = onToggle, colors = SwitchDefaults.colors(checkedTrackColor = iOSBlue))
     }
 }
+@Composable private fun Divider() { HorizontalDivider(color = iOSGray2, thickness = 0.5.dp, modifier = Modifier.padding(horizontal = 16.dp)) }
