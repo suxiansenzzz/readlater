@@ -4,29 +4,46 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+
+// iOS-style colors (matching OrthoTimer)
+val iOSBlue = Color(0xFF007AFF)
+val iOSGreen = Color(0xFF34C759)
+val iOSOrange = Color(0xFFFF9500)
+val iOSRed = Color(0xFFFF3B30)
+val iOSGray1 = Color(0xFFF2F2F7)
+val iOSGray2 = Color(0xFFE5E5EA)
+val iOSGray3 = Color(0xFFC7C7CC)
+val iOSGray4 = Color(0xFF8E8E93)
+val iOSGray5 = Color(0xFF636366)
+val iOSGray6 = Color(0xFF3A3A3C)
 
 private val Light = lightColorScheme(
-    primary = Color(0xFF2196F3),
+    primary = iOSBlue,
     onPrimary = Color.White,
-    background = Color(0xFFF5F5F5),
+    background = iOSGray1,
     surface = Color.White,
-    onBackground = Color(0xFF212121),
-    onSurface = Color(0xFF212121),
-    surfaceVariant = Color(0xFFEEEEEE),
-    outline = Color(0xFFE0E0E0),
-    onSurfaceVariant = Color(0xFF757575)
+    onBackground = Color(0xFF1C1C1E),
+    onSurface = Color(0xFF1C1C1E),
+    surfaceVariant = Color.White,
+    outline = iOSGray2,
+    onSurfaceVariant = iOSGray4,
+    error = iOSRed
 )
 
 private val Dark = darkColorScheme(
-    primary = Color(0xFF90CAF9),
-    onPrimary = Color(0xFF212121),
-    background = Color(0xFF121212),
-    surface = Color(0xFF1E1E1E),
-    onBackground = Color(0xFFE0E0E0),
-    onSurface = Color(0xFFE0E0E0),
-    surfaceVariant = Color(0xFF2C2C2C),
-    outline = Color(0xFF444444),
-    onSurfaceVariant = Color(0xFFAAAAAA)
+    primary = Color(0xFF0A84FF),
+    onPrimary = Color.White,
+    background = Color(0xFF000000),
+    surface = iOSGray6,
+    onBackground = Color(0xFFE5E5EA),
+    onSurface = Color(0xFFE5E5EA),
+    surfaceVariant = iOSGray6,
+    outline = Color(0xFF38383A),
+    onSurfaceVariant = iOSGray4,
+    error = Color(0xFFFF453A)
 )
 
 @Composable
