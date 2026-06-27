@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <style name="Theme.ReadLater" parent="Theme.AppCompat.Light.NoActionBar">
-        <item name="colorPrimary">#90CAF9</item>
-        <item name="colorPrimaryDark">#1976D2</item>
-        <item name="colorAccent">#03DAC5</item>
-        <item name="android:statusBarColor">#0D1117</item>
-    </style>
-</resources>

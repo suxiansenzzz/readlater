@@ -1,23 +1,51 @@
 package com.readlater.app
 
 import android.os.Bundle
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.appcompat.app.AppCompatActivity
-import androidx.compose.animation.*
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.readlater.app.ui.screens.*
-import com.readlater.app.ui.theme.ReadLaterTheme
 import com.readlater.app.viewmodel.MainViewModel
 
-class MainActivity : AppCompatActivity() {
+// Colors defined directly in Compose - no XML theme needed
+private val LightColors = lightColorScheme(
+    primary = Color(0xFF2196F3),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFF90CAF9),
+    secondary = Color(0xFF03DAC5),
+    background = Color(0xFFFAFAFA),
+    surface = Color.White,
+    onBackground = Color(0xFF212121),
+    onSurface = Color(0xFF212121),
+    surfaceVariant = Color(0xFFF5F5F5),
+    outline = Color(0xFFE0E0E0)
+)
+
+private val DarkColors = darkColorScheme(
+    primary = Color(0xFF90CAF9),
+    onPrimary = Color(0xFF212121),
+    primaryContainer = Color(0xFF1976D2),
+    secondary = Color(0xFF03DAC5),
+    background = Color(0xFF121212),
+    surface = Color(0xFF1E1E1E),
+    onBackground = Color(0xFFF5F5F5),
+    onSurface = Color(0xFFF5F5F5),
+    surfaceVariant = Color(0xFF2C2C2C),
+    outline = Color(0xFF757575)
+)
+
+class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            ReadLaterTheme {
+            val colors = if (isSystemInDarkTheme()) DarkColors else LightColors
+            MaterialTheme(colorScheme = colors) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -44,12 +72,10 @@ fun ReadLaterApp(viewModel: MainViewModel = viewModel()) {
     val selectedArticle by viewModel.selectedArticle.collectAsState()
     val saveResult by viewModel.saveResult.collectAsState()
 
-    // Load on first composition
     LaunchedEffect(Unit) {
         viewModel.loadArticles()
     }
 
-    // Show save result as snackbar
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(saveResult) {
         saveResult?.let {
@@ -98,7 +124,6 @@ fun ReadLaterApp(viewModel: MainViewModel = viewModel()) {
         }
     }
 
-    // Add article dialog
     if (showAddDialog) {
         AddArticleDialog(
             onDismiss = { showAddDialog = false },
