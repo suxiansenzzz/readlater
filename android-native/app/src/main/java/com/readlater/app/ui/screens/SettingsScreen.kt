@@ -3,7 +3,7 @@ package com.readlater.app.ui.screens
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -31,7 +31,7 @@ fun SettingsScreen(
                 title = { Text("设置", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -168,7 +168,7 @@ fun SettingsScreen(
                         )
                     }
                     Spacer(Modifier.height(12.dp))
-                    Text("ReadLater v2.0.0", style = MaterialTheme.typography.bodyMedium)
+                    Text("ReadLater v2.1.0", style = MaterialTheme.typography.bodyMedium)
                     Text("原生 Android 版", style = MaterialTheme.typography.bodySmall, 
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

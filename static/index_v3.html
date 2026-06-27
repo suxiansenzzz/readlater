@@ -3298,7 +3298,7 @@ function createCard(article) {
             tags = article.tags.split(',').map(t => t.trim()).filter(t => t);
         }
     }
-    const tagsHtml = tags.map(t => `<span class="tag">${t}</span>`).join('');
+    const tagsHtml = tags.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('');
     
     // 去除excerpt中的HTML标签（含未闭合的），并截取前150个字符
     let excerpt = article.excerpt || '暂无摘要';
@@ -3323,7 +3323,7 @@ function createCard(article) {
                 </div>
             </div>
             <div class="article-content">
-                <h3 class="article-title">${article.title || '无标题'}</h3>
+                <h3 class="article-title">${escapeHtml(article.title || '无标题')}</h3>
                 <div class="article-meta">
                     <span>📅 ${formatDate(article.created_at)}</span>
                     ${article.domain ? `<span>🌐 ${article.domain}</span>` : ''}
@@ -3435,7 +3435,7 @@ function showReadingView(article) {
     document.body.style.overflow = 'hidden';
     DOM.readingContent.innerHTML = `
         <article class="reading-article">
-            <h1 class="reading-title">${article.title || '无标题'}</h1>
+            <h1 class="reading-title">${escapeHtml(article.title || '无标题')}</h1>
             <div class="reading-meta">
                 ${article.domain ? `<span>🌐 ${article.domain}</span>` : ''}
                 ${article.author ? `<span>✍️ ${article.author}</span>` : ''}
@@ -4340,11 +4340,7 @@ async function clearResolvedErrors() {
 }
 
 // 辅助函数
-function formatDate(dateString) {
-    if (!dateString) return '未知';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('zh-CN');
-}
+// formatDate 已在前面定义（富格式化版本：刚刚、3分钟前等）
 
 function escapeHtml(text) {
     if (!text) return '';
@@ -4771,13 +4767,7 @@ function formatHotScore(score) {
     return score;
 }
 
-// HTML转义
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+// escapeHtml 已在前面定义
 
 // 提前应用主题（不等 DOMContentLoaded，防止刷新闪白）
 (function applyThemeEarly() {

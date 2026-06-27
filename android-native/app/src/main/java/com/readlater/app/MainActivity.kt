@@ -58,7 +58,7 @@ fun ReadLaterApp(viewModel: MainViewModel = viewModel()) {
         }
     }
 
-    when (val screen = currentScreen) {
+    when (currentScreen) {
         is Screen.List -> {
             ArticleListScreen(
                 state = listState,

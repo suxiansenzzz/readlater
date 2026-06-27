@@ -128,9 +128,13 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="ReadLater", version="2.6.0", lifespan=lifespan)
 
 # 添加CORS中间件，允许浏览器扩展跨域请求
+# 注意：allow_origins=["*"] + allow_credentials=True 是不安全的组合
+# 使用正则匹配浏览器扩展和本地访问
+import re as _cors_re
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 允许所有来源，生产环境应限制
+    allow_origins=["http://localhost:8000", "http://127.0.0.1:8000"],
+    allow_origin_regex=r"^chrome-extension://.*$|^moz-extension://.*$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

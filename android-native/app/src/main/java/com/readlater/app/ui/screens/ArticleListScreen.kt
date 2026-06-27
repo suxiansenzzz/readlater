@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Article
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -39,7 +40,6 @@ fun ArticleListScreen(
     onLoadMore: () -> Unit,
     onAddClick: () -> Unit
 ) {
-    var showAddDialog by remember { mutableStateOf(false) }
     val filters = listOf("all" to "全部", "unread" to "未读", "favorite" to "收藏", "archived" to "已归档")
 
     Scaffold(
@@ -269,7 +269,7 @@ fun EmptyState(filter: String) {
         verticalArrangement = Arrangement.Center
     ) {
         Icon(
-            Icons.Outlined.Article,
+            Icons.AutoMirrored.Outlined.Article,
             contentDescription = null,
             modifier = Modifier.size(64.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
